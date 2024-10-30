@@ -173,7 +173,7 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
             }
 #endif
             zend_array *arr;
-            array_init(return_value);
+            array_init_size(return_value, json_array.size());
             arr = Z_ARR_P(return_value);
 
             for (simdjson::dom::element child : json_array) {
@@ -199,7 +199,7 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
             }
 #endif
             zend_array *arr;
-            array_init(return_value);
+            array_init_size(return_value, json_object.size());
             arr = Z_ARR_P(return_value);
 
             for (simdjson::dom::key_value_pair field : json_object) {
@@ -253,7 +253,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
             }
 #endif
             zend_array *arr;
-            array_init(return_value);
+            array_init_size(return_value, json_array.size());
             arr = Z_ARR_P(return_value);
 
             for (simdjson::dom::element child : json_array) {
