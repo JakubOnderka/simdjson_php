@@ -349,9 +349,16 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
+    // Do not copy to new buffer when we know that string allocated size is bigger than real len + SIMDJSON_PADDING
+    bool realloc_if_needed = true;
+    if (EXPECTED(!(GC_FLAGS(json) & IS_STR_PERSISTENT))) { // it is not possible to check allocated size for persistent string
+        size_t block_size = zend_mem_block_size((void*)json);
+        realloc_if_needed = block_size <= ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING;
+    }
+
     simdjson::dom::element doc;
-    simdjson::error_code error = build_parsed_json_cust(parser, doc, json, len, true, depth);
+    simdjson::error_code error = build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth);
     if (error) {
         return error;
     }

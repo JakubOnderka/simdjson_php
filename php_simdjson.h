@@ -117,14 +117,6 @@ typedef uint8_t simdjson_php_error_code;
 /* NOTE: Callers should check if len is greater than 4GB - simdjson will always return a non zero error code for those */
 
 /**
- * Parses the given string into a return code, using the default singleton parser.
- *
- * This must be called after simdjson's request initialization phase and before simdjson's request shutdown phase.
- * (e.g. PECLs should not use this during module or request initialization/shutdown)
- */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse_default(const char *json, size_t len, zval *return_value, bool associative, size_t depth);
-
-/**
  * Checks if the given JSON is valid, using the default singleton parser.
  * Returns 0 if it is valid.
  */
@@ -174,7 +166,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(struct simdjson_p
  * If the returned error code is 0, then return_value contains the parsed value.
  * If the returned error code is non-0, then return_value will not be initialized.
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth);
 /**
  * Parses the part of the given string at the json pointer 'key' into a PHP value at return_value
  *
