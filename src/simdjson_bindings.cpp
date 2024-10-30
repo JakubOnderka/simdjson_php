@@ -151,9 +151,11 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
             simdjson_set_zval_to_int64(return_value, element.get_int64().value_unsafe());
             break;
             /* UINT64 is used for positive values exceeding INT64_MAX */
-        case simdjson::dom::element_type::UINT64 : ZVAL_DOUBLE(return_value, (double)element.get_uint64().value_unsafe());
+        case simdjson::dom::element_type::UINT64 :
+            ZVAL_DOUBLE(return_value, (double)element.get_uint64().value_unsafe());
             break;
-        case simdjson::dom::element_type::DOUBLE : ZVAL_DOUBLE(return_value, element.get_double().value_unsafe());
+        case simdjson::dom::element_type::DOUBLE :
+            ZVAL_DOUBLE(return_value, element.get_double().value_unsafe());
             break;
         case simdjson::dom::element_type::BOOL :
             ZVAL_BOOL(return_value, element.get_bool().value_unsafe());
