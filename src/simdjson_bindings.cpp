@@ -111,7 +111,9 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
         return;
     }
 #endif
-    ZVAL_STRINGL(v, buf, len);
+    zend_string *str = zend_string_init(buf, len, 0);
+    GC_ADD_FLAGS(str, IS_STR_VALID_UTF8); // JSON string must be always valid UTF-8 string
+    ZVAL_NEW_STR(v, str);
 }
 
 static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value) {
@@ -210,7 +212,6 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
                     ZVAL_NULL(return_value);
                     return error;
                 }
-                /* TODO consider using zend_string_init_existing_interned in php 8.1+ to save memory and time freeing strings. */
                 simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element);
             }
             break;
