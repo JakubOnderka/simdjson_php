@@ -108,7 +108,9 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
     }
 #endif
     zend_string *str = zend_string_init(buf, len, 0);
+#ifdef IS_STR_VALID_UTF8
     GC_ADD_FLAGS(str, IS_STR_VALID_UTF8); // JSON string must be always valid UTF-8 string
+#endif
     ZVAL_NEW_STR(v, str);
 }
 
@@ -123,7 +125,12 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         return;
     }
 #endif
+
+#if PHP_VERSION_ID >= 80100
+    zend_string *key = zend_string_init_existing_interned(buf, len, 0);
+#else
     zend_string *key = zend_string_init(buf, len, 0);
+#endif
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
@@ -230,9 +237,11 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
             simdjson_set_zval_to_int64(return_value, element.get_int64().value_unsafe());
             break;
             /* UINT64 is used for positive values exceeding INT64_MAX */
-        case simdjson::dom::element_type::UINT64 : ZVAL_DOUBLE(return_value, (double)element.get_uint64().value_unsafe());
+        case simdjson::dom::element_type::UINT64 :
+            ZVAL_DOUBLE(return_value, (double)element.get_uint64().value_unsafe());
             break;
-        case simdjson::dom::element_type::DOUBLE : ZVAL_DOUBLE(return_value, element.get_double().value_unsafe());
+        case simdjson::dom::element_type::DOUBLE :
+            ZVAL_DOUBLE(return_value, element.get_double().value_unsafe());
             break;
         case simdjson::dom::element_type::BOOL :
             ZVAL_BOOL(return_value, element.get_bool().value_unsafe());
@@ -355,10 +364,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser*
     }
 
     simdjson::dom::element doc;
-    simdjson::error_code error = build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth);
-    if (error) {
-        return error;
-    }
+    SIMDJSON_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth));
 
     if (associative) {
         return create_array(doc, return_value);
