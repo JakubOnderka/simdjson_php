@@ -76,16 +76,12 @@ build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc,
             depth = len * 2;
         }
     }
-    auto error = parser->parser.allocate(len, depth);
 
-    if (error) {
-        return error;
+    if (parser->parser.max_depth() != depth) {
+        SIMDJSON_TRY(parser->parser.allocate(0, depth));
     }
 
-    error = parser->parser.parse(buf, len, realloc_if_needed).get(doc);
-    if (error) {
-        return error;
-    }
+    SIMDJSON_TRY(parser->parser.parse(buf, len, realloc_if_needed).get(doc));
 
     return simdjson::SUCCESS;
 }
