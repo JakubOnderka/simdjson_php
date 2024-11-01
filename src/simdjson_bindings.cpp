@@ -140,10 +140,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
     }
 #endif
 
-    zend_string *key = simdjson_string_init(buf, len);
-    zend_symtable_update(ht, key, value);
-    /* Release the reference counted key */
-    zend_string_release_ex(key, 0);
+    zend_symtable_str_update(ht, buf, len, value);
 }
 
 static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, const int64_t value) {
@@ -156,7 +153,7 @@ static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, const int64_
     ZVAL_LONG(zv, value);
 }
 
-static simdjson_php_error_code create_array(simdjson::dom::element element, zval *return_value) /* {{{ */ {
+static void create_array(const simdjson::dom::element element, zval *return_value) /* {{{ */ {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -193,15 +190,9 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
 
             for (simdjson::dom::element child : json_array) {
                 zval array_element;
-                simdjson_php_error_code error = create_array(child, &array_element);
-                if (UNEXPECTED(error)) {
-                    zval_ptr_dtor(return_value);
-                    ZVAL_NULL(return_value);
-                    return error;
-                }
+                create_array(child, &array_element);
                 zend_hash_next_index_insert(arr, &array_element);
             }
-
             break;
         }
         case simdjson::dom::element_type::OBJECT : {
@@ -219,20 +210,13 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 zval array_element;
-                simdjson_php_error_code error = create_array(field.value, &array_element);
-                if (UNEXPECTED(error)) {
-                    zval_ptr_dtor(return_value);
-                    ZVAL_NULL(return_value);
-                    return error;
-                }
+                create_array(field.value, &array_element);
                 simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element);
             }
             break;
         }
         EMPTY_SWITCH_DEFAULT_CASE();
     }
-
-    return simdjson::SUCCESS;
 }
 
 /* }}} */
@@ -376,7 +360,8 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser*
     SIMDJSON_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth));
 
     if (associative) {
-        return create_array(doc, return_value);
+        create_array(doc, return_value);
+        return simdjson::SUCCESS;
     } else {
         return create_object(doc, return_value);
     }
@@ -389,7 +374,8 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_par
     SIMDJSON_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
     SIMDJSON_TRY(get_key_with_optional_prefix(doc, key).get(element));
     if (associative) {
-        return create_array(element, return_value);
+        create_array(element, return_value);
+        return simdjson::SUCCESS;
     } else {
         return create_object(element, return_value);
     }
