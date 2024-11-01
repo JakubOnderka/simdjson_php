@@ -143,6 +143,12 @@ PHP_FUNCTION (simdjson_is_valid) {
     if (!simdjson_validate_depth(depth, "simdjson_is_valid", 2)) {
         RETURN_THROWS();
     }
+
+    // Fast track when validity check for empty JSON object, so we don't need to initialize parser
+    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+        RETURN_TRUE;
+    }
+
     simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
     ZVAL_BOOL(return_value, !error);
 }
@@ -162,6 +168,17 @@ PHP_FUNCTION (simdjson_decode) {
     if (!simdjson_validate_depth(depth, "simdjson_decode", 2)) {
         RETURN_THROWS();
     }
+
+    // Fast track when decoding empty JSON object, so we don't need to initialize parser
+    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+        if (associative) {
+            RETURN_EMPTY_ARRAY();
+        } else {
+            object_init(return_value);
+            return;
+        }
+    }
+
     simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth);
     if (error) {
         php_simdjson_throw_jsonexception(error);
