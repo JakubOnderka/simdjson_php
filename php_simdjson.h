@@ -159,7 +159,7 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(struct simdjson_php_parser* parse
 /**
  * Returns 0 if the given json string is valid
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(struct simdjson_php_parser* parser, const char *json, size_t len, size_t depth);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(struct simdjson_php_parser* parser, const zend_string *json, size_t depth);
 /**
  * Parses the given string into a return code.
  *

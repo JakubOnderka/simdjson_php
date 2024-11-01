@@ -143,12 +143,8 @@ PHP_FUNCTION (simdjson_is_valid) {
     if (!simdjson_validate_depth(depth, "simdjson_is_valid", 2)) {
         RETURN_THROWS();
     }
-    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), depth);
+    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
     ZVAL_BOOL(return_value, !error);
-}
-
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate_default(const char *json, size_t len, size_t depth) {
-    return php_simdjson_validate(simdjson_get_parser(), json, len, depth);
 }
 
 PHP_FUNCTION (simdjson_decode) {

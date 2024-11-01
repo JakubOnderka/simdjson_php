@@ -54,6 +54,23 @@ get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_
     return doc.at_pointer(std_pointer);
 }
 
+static inline bool reallocation_needed(const zend_string *json) {
+    bool realloc_if_needed = true;
+    if (EXPECTED(!(GC_FLAGS(json) & IS_STR_PERSISTENT))) { // it is not possible to check allocated size for persistent string
+        size_t block_size = zend_mem_block_size((void*)json);
+        realloc_if_needed = block_size <= ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING;
+    }
+    return realloc_if_needed;
+}
+
+static inline zend_string* simdjson_string_init(const char* buf, const size_t len) {
+    zend_string *str = zend_string_init(buf, len, 0);
+#ifdef IS_STR_VALID_UTF8
+    GC_ADD_FLAGS(str, IS_STR_VALID_UTF8); // JSON string must be always valid UTF-8 string
+#endif
+    return str;
+}
+
 static simdjson::error_code
 build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc, const char *buf, size_t len, bool realloc_if_needed,
                        size_t depth = simdjson::DEFAULT_MAX_DEPTH) {
@@ -107,10 +124,7 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
         return;
     }
 #endif
-    zend_string *str = zend_string_init(buf, len, 0);
-#ifdef IS_STR_VALID_UTF8
-    GC_ADD_FLAGS(str, IS_STR_VALID_UTF8); // JSON string must be always valid UTF-8 string
-#endif
+    zend_string *str = simdjson_string_init(buf, len);
     ZVAL_NEW_STR(v, str);
 }
 
@@ -126,11 +140,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
     }
 #endif
 
-#if PHP_VERSION_ID >= 80100
-    zend_string *key = zend_string_init_existing_interned(buf, len, 0);
-#else
-    zend_string *key = zend_string_init(buf, len, 0);
-#endif
+    zend_string *key = simdjson_string_init(buf, len);
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
@@ -305,7 +315,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 if (size <= 1) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
-                    key = zend_string_init(data, size, 0);
+                    key = simdjson_string_init(data, size);
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
@@ -347,21 +357,20 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
     delete parser;
 }
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const char *json, size_t len, size_t depth) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) /* {{{ */ {
+    // Do not copy to new buffer when we know that string allocated size is bigger than real len + SIMDJSON_PADDING
+    bool realloc_if_needed = reallocation_needed(json);
+
     simdjson::dom::element doc;
     /* The depth is passed in to ensure this behaves the same way for the same arguments */
-    return build_parsed_json_cust(parser, doc, json, len, true, depth);
+    return build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth);
 }
 
 /* }}} */
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     // Do not copy to new buffer when we know that string allocated size is bigger than real len + SIMDJSON_PADDING
-    bool realloc_if_needed = true;
-    if (EXPECTED(!(GC_FLAGS(json) & IS_STR_PERSISTENT))) { // it is not possible to check allocated size for persistent string
-        size_t block_size = zend_mem_block_size((void*)json);
-        realloc_if_needed = block_size <= ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING;
-    }
+    bool realloc_if_needed = reallocation_needed(json);
 
     simdjson::dom::element doc;
     SIMDJSON_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth));
