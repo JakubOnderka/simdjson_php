@@ -172,7 +172,12 @@ PHP_FUNCTION (simdjson_decode) {
     // Fast track when decoding empty JSON object, so we don't need to initialize parser
     if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
         if (associative) {
+#ifdef RETURN_EMPTY_ARRAY
             RETURN_EMPTY_ARRAY();
+#else
+            array_init(return_value);
+            return;
+#endif
         } else {
             object_init(return_value);
             return;
