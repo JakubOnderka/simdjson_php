@@ -239,6 +239,13 @@ PHP_FUNCTION (simdjson_is_valid_utf8) {
         Z_PARAM_STR(string)
     ZEND_PARSE_PARAMETERS_END();
 
+#ifdef ZSTR_IS_VALID_UTF8
+    // If string was already successfully validated, just return true
+    if (ZSTR_IS_VALID_UTF8(string)) {
+        RETURN_TRUE;
+    }
+#endif
+
     bool is_ok = simdjson::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
 
 #ifdef IS_STR_VALID_UTF8
