@@ -43,6 +43,10 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 #define RETURN_THROWS() do { ZEND_ASSERT(EG(exception)); (void) return_value; return; } while (0)
 #endif
 
+#ifndef RETURN_EMPTY_ARRAY
+#define RETURN_EMPTY_ARRAY() do { array_init(return_value); return; } while (0)
+#endif
+
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
 #if PHP_VERSION_ID >= 70200
@@ -145,8 +149,12 @@ PHP_FUNCTION (simdjson_is_valid) {
     }
 
     // Fast track when validity check for empty JSON object, so we don't need to initialize parser
-    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
-        RETURN_TRUE;
+    if (ZSTR_LEN(json) == 2) {
+        if (ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+            RETURN_TRUE;
+        } else if (ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
+            RETURN_TRUE;
+        }
     }
 
     simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
@@ -169,18 +177,17 @@ PHP_FUNCTION (simdjson_decode) {
         RETURN_THROWS();
     }
 
-    // Fast track when decoding empty JSON object, so we don't need to initialize parser
-    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
-        if (associative) {
-#ifdef RETURN_EMPTY_ARRAY
+    // Fast track when decoding empty JSON object or array, so we don't need to initialize parser
+    if (ZSTR_LEN(json) == 2) {
+        if (ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+            if (associative) {
+                RETURN_EMPTY_ARRAY();
+            } else {
+                object_init(return_value);
+                return;
+            }
+        } else if (ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
             RETURN_EMPTY_ARRAY();
-#else
-            array_init(return_value);
-            return;
-#endif
-        } else {
-            object_init(return_value);
-            return;
         }
     }
 
