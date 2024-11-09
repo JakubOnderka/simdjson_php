@@ -36,7 +36,9 @@ PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code erro
         case SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY:
             return "Invalid property name";
         default:
-            return simdjson::error_message((simdjson::error_code) error);
+            auto message = simdjson::error_message((simdjson::error_code) error);
+            // Remove constant name from error message
+            return strstr(message, ": ") + 2;
     }
 }
 

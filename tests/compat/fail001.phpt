@@ -70,14 +70,14 @@ AS ARRAY
 Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: ["double extra comma",,]
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
 Testing: [   , "<-- missing value"]
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
 Testing: ["Comma after the close"],
 AS OBJECT
 Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
@@ -165,6 +165,6 @@ AS ARRAY
 Caught SimdJsonException: Problem while parsing an atom starting with the letter 't'
 Testing: ['single quote']
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonException: Problem while parsing a number
