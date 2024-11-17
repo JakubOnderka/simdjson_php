@@ -172,11 +172,14 @@ static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashT
  * Optimised variant _zend_hash_str_add_or_update_i that removes a lof of redundant checks that are not necessary
  * when adding new item to initialized known hash array that is already allocated to required size
  */
-static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zend_ulong h, zval *pData)
+static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData)
 {
 	uint32_t nIndex;
 	uint32_t idx;
 	Bucket *p;
+
+	// Compute key hash
+	zend_ulong h = zend_inline_hash_func(str, len);
 
     p = simdjson_zend_hash_str_find_bucket(ht, str, len, h);
     if (UNEXPECTED(p)) { // Key already exists, replace value
@@ -230,8 +233,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
     if (UNEXPECTED(ZEND_HANDLE_NUMERIC_STR(buf, len, idx))) {
         zend_hash_index_update(ht, idx, value);
     } else {
-        zend_ulong h = zend_inline_hash_func(buf, len);
-        simdjson_zend_hash_str_add_or_update(ht, buf, len, h, value);
+        simdjson_zend_hash_str_add_or_update(ht, buf, len, value);
     }
 #else
     zend_symtable_str_update(ht, buf, len, value);
@@ -246,10 +248,11 @@ static zend_always_inline zend_array* simdjson_packed_array_init(zval *zv, uint3
 
 #if PHP_VERSION_ID >= 80200
     zend_hash_real_init_packed(arr);
-    arr->nNextFreeElement = 0; // put array pointer to start, we know that array will not be empty
     arr->nNumOfElements = size; // we know exact size in advance
     arr->nNumUsed = size;
-#elif PHP_VERSION_ID >= 80100
+#endif
+
+#if PHP_VERSION_ID >= 80100
     arr->nNextFreeElement = 0; // put array pointer to start, we know that array will not be empty
 #endif
 
@@ -261,8 +264,7 @@ static zend_always_inline zend_array* simdjson_packed_array_init(zval *zv, uint3
  * Highly optimised variant for adding value to already initialized and preallocated array in PHP8.2 and newer
  * Original method: zend_hash_next_index_insert_new
 */
-static zend_always_inline zval* simdjson_packed_array_insert_next(HashTable *ht)
-{
+static zend_always_inline zval* simdjson_packed_array_next(HashTable *ht) {
 #if PHP_VERSION_ID >= 80200
     zval *zv;
     zv = ht->arPacked + ht->nNextFreeElement;
@@ -277,7 +279,66 @@ static zend_always_inline zval* simdjson_packed_array_insert_next(HashTable *ht)
 #endif
 }
 
-static void create_array(const simdjson::dom::element element, zval *return_value) /* {{{ */ {
+static inline void create_array(const simdjson::dom::element element, zval *return_value);
+
+static void simdjson_create_array_convert_element_to_big_array(const simdjson::dom::array json_array, zval *return_value) {
+    zend_array *arr;
+    array_init_size(return_value, 0xFFFF); // prepare new array with maximum size
+    arr = Z_ARR_P(return_value);
+    for (simdjson::dom::element child : json_array) {
+        zval zv;
+        ZVAL_NULL(&zv);
+        zval* next_array_element = zend_hash_next_index_insert_new(arr, &zv);
+        create_array(child, next_array_element);
+    }
+}
+
+static inline void simdjson_create_array_convert_element_to_array(const simdjson::dom::element element, zval *return_value) {
+    const auto json_array = element.get_array().value_unsafe();
+    const auto size = json_array.size();
+    if (size == 0) {
+        /* Reuse the immutable empty array to save memory */
+        ZVAL_EMPTY_ARRAY(return_value);
+    } else if (size == 1) {
+        // Fast track for array with one element
+        zend_array *arr = simdjson_packed_array_init(return_value, 1);
+        zval* next_array_element = simdjson_packed_array_next(arr);
+        create_array(json_array.at(0).value_unsafe(), next_array_element);
+    } else if (UNEXPECTED(size == 0xFFFF)) {
+        // Maximum size, number or elements will be higher so we cannot use speedup
+        simdjson_create_array_convert_element_to_big_array(json_array, return_value);
+    } else {
+        zend_array *arr = simdjson_packed_array_init(return_value, size);
+        for (simdjson::dom::element child : json_array) {
+            create_array(child, simdjson_packed_array_next(arr));
+        }
+    }
+}
+
+static inline void simdjson_create_array_convert_element_to_object(const simdjson::dom::element element, zval *return_value) {
+    const auto json_object = element.get_object().value_unsafe();
+    const auto size = json_object.size();
+    if (size == 0) {
+        /* Reuse the immutable empty array to save memory */
+        ZVAL_EMPTY_ARRAY(return_value);
+    } else if (size == 1) {
+        // Fast track for objects with only one element
+        zend_array *arr = simdjson_hash_array_init(return_value, 1);
+        auto field = json_object.begin();
+        zval array_element;
+        create_array(field.value(), &array_element);
+        simdjson_add_key_to_symtable(arr, field.key().data(), field.key().size(), &array_element);
+    } else {
+        zend_array *arr = simdjson_hash_array_init(return_value, size);
+        for (simdjson::dom::key_value_pair field : json_object) {
+            zval array_element;
+            create_array(field.value, &array_element);
+            simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element);
+        }
+    }
+}
+
+static inline void create_array(const simdjson::dom::element element, zval *return_value) /* {{{ */ {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -299,50 +360,12 @@ static void create_array(const simdjson::dom::element element, zval *return_valu
         case simdjson::dom::element_type::NULL_VALUE :
             ZVAL_NULL(return_value);
             break;
-        case simdjson::dom::element_type::ARRAY : {
-            const auto json_array = element.get_array().value_unsafe();
-            const auto size = json_array.size();
-            if (size == 0) {
-                /* Reuse the immutable empty array to save memory */
-                ZVAL_EMPTY_ARRAY(return_value);
-            } else if (size == 1) {
-                // Fast track for array with one element
-                zend_array *arr = simdjson_packed_array_init(return_value, 1);
-                zval* next_array_element = simdjson_packed_array_insert_next(arr);
-                create_array(json_array.at(0).value_unsafe(), next_array_element);
-            } else {
-                zend_array *arr = simdjson_packed_array_init(return_value, size);
-                for (simdjson::dom::element child : json_array) {
-                    zval* next_array_element = simdjson_packed_array_insert_next(arr);
-                    create_array(child, next_array_element);
-                }
-            }
+        case simdjson::dom::element_type::ARRAY :
+            simdjson_create_array_convert_element_to_array(element, return_value);
             break;
-        }
-        case simdjson::dom::element_type::OBJECT : {
-            const auto json_object = element.get_object().value_unsafe();
-            const auto size = json_object.size();
-            if (size == 0) {
-                /* Reuse the immutable empty array to save memory */
-                ZVAL_EMPTY_ARRAY(return_value);
-            } else if (size == 1) {
-                // Fast track for objects with only one element
-                zend_array *arr = simdjson_hash_array_init(return_value, 1);
-                auto field = json_object.begin();
-                zval array_element;
-                create_array(field.value(), &array_element);
-                simdjson_add_key_to_symtable(arr, field.key().data(), field.key().size(), &array_element);
-            } else {
-                zend_array *arr = simdjson_hash_array_init(return_value, size);
-
-                for (simdjson::dom::key_value_pair field : json_object) {
-                    zval array_element;
-                    create_array(field.value, &array_element);
-                    simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element);
-                }
-            }
+        case simdjson::dom::element_type::OBJECT :
+            simdjson_create_array_convert_element_to_object(element, return_value);
             break;
-        }
         EMPTY_SWITCH_DEFAULT_CASE();
     }
 }
@@ -382,7 +405,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
             zend_array *arr = simdjson_packed_array_init(return_value, json_array.size());
 
             for (simdjson::dom::element child : json_array) {
-                zval* value = simdjson_packed_array_insert_next(arr);
+                zval* value = simdjson_packed_array_next(arr);
                 simdjson_php_error_code error = create_object(child, value);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
