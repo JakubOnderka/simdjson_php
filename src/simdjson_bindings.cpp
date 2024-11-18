@@ -168,7 +168,7 @@ static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashT
 	return NULL;
 }
 
-static HashTable simdjson_repeated_key_strings;
+static thread_local HashTable simdjson_repeated_key_strings;
 #define SIMDJSON_REPEATED_STRINGS_COUNT 256
 
 static inline void simdjson_initialize_repeated_key_table() {
@@ -644,28 +644,28 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_par
         case simdjson::dom::element_type::ARRAY : {
             auto json_array = element.get_array().value_unsafe();
             key_count = zend_long(json_array.size());
-            if (UNEXPECTED(key_count == 0xFFFFFF)) {
+            if (UNEXPECTED(key_count == SIMDJSON_MAXIMUM_ARRAY_SIZE)) {
                 /* The C simdjson library represents array sizes larger than 0xFFFFFF as 0xFFFFFF. */
                 key_count = 0;
                 for (auto it: json_array)  {
                     (void)it;
                     key_count++;
                 }
-                ZEND_ASSERT(key_count >= 0xFFFFFF);
+                ZEND_ASSERT(key_count >= SIMDJSON_MAXIMUM_ARRAY_SIZE);
             }
             break;
         }
         case simdjson::dom::element_type::OBJECT : {
             auto json_object = element.get_object().value_unsafe();
             key_count = zend_long(json_object.size());
-            if (UNEXPECTED(key_count == 0xFFFFFF)) {
+            if (UNEXPECTED(key_count == SIMDJSON_MAXIMUM_ARRAY_SIZE)) {
                 /* The C simdjson library represents object sizes larger than 0xFFFFFF as 0xFFFFFF. */
                 key_count = 0;
                 for (auto it: json_object) {
                     (void)it;
                     key_count++;
                 }
-                ZEND_ASSERT(key_count >= 0xFFFFFF);
+                ZEND_ASSERT(key_count >= SIMDJSON_MAXIMUM_ARRAY_SIZE);
             }
             break;
         }
