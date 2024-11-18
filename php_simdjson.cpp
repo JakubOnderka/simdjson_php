@@ -191,6 +191,14 @@ PHP_FUNCTION (simdjson_decode) {
         }
     }
 
+#if PHP_VERSION_ID >= 80200
+    if (zend_string_equals_cstr(json, "true", 4)) {
+        RETURN_TRUE;
+    } else if (zend_string_equals_cstr(json, "false", 5)) {
+        RETURN_FALSE;
+    }
+#endif
+
     simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth);
     if (error) {
         php_simdjson_throw_jsonexception(error);
