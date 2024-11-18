@@ -79,10 +79,6 @@ ZEND_BEGIN_MODULE_GLOBALS(simdjson)
      * This is similar to php-src's ext/session session data storage.
      */
     struct simdjson_php_parser *parser;
-    /*
-     * Table that keeps repeated strings in array keys, so we can deduplicate them
-     */
-    HashTable repeated_key_strings;
 ZEND_END_MODULE_GLOBALS(simdjson)
 
 PHP_MINIT_FUNCTION(simdjson);
@@ -170,7 +166,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(struct simdjson_p
  * If the returned error code is 0, then return_value contains the parsed value.
  * If the returned error code is non-0, then return_value will not be initialized.
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth, HashTable *repeated_key_strings);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth);
 /**
  * Parses the part of the given string at the json pointer 'key' into a PHP value at return_value
  *
@@ -182,7 +178,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_
  *
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(struct simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, bool associative, size_t depth, HashTable *repeated_key_strings);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(struct simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, bool associative, size_t depth);
 /**
  * Checks if the json pointer 'key' exists in the given json string.
  *

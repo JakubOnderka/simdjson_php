@@ -195,7 +195,7 @@ PHP_FUNCTION (simdjson_decode) {
     }
 #endif
 
-    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth, &SIMDJSON_G(repeated_key_strings));
+    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth);
     if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);
         RETURN_THROWS();
@@ -213,7 +213,7 @@ PHP_FUNCTION (simdjson_key_value) {
     if (!simdjson_validate_depth(depth, "simdjson_key_value", 4)) {
         RETURN_THROWS();
     }
-    simdjson_php_error_code error = php_simdjson_key_value(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_VAL(key), return_value, associative, depth, &SIMDJSON_G(repeated_key_strings));
+    simdjson_php_error_code error = php_simdjson_key_value(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_VAL(key), return_value, associative, depth);
     if (error) {
         php_simdjson_throw_jsonexception(error);
         RETURN_THROWS();
@@ -404,12 +404,6 @@ PHP_RSHUTDOWN_FUNCTION (simdjson) {
         php_simdjson_free_parser(parser);
         SIMDJSON_G(parser) = NULL;
     }
-#if PHP_VERSION_ID >= 80200
-    HashTable repeated_key_strings = SIMDJSON_G(repeated_key_strings);
-    if (repeated_key_strings.nTableSize != 0) {
-        zend_hash_destroy(&repeated_key_strings);
-    }
-#endif
     return SUCCESS;
 }
 /* }}} */
