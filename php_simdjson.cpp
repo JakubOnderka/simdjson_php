@@ -153,6 +153,13 @@ PHP_FUNCTION (simdjson_is_valid) {
         }
     }
 
+#if PHP_VERSION_ID >= 80200
+    // Fast track when validating boolean values, that do no need to initialize parser
+    if (zend_string_equals_cstr(json, "true", 4) || zend_string_equals_cstr(json, "false", 5)) {
+        RETURN_TRUE;
+    }
+#endif
+
     simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
     ZVAL_BOOL(return_value, !error);
 }
@@ -188,6 +195,7 @@ PHP_FUNCTION (simdjson_decode) {
     }
 
 #if PHP_VERSION_ID >= 80200
+    // Fast track when decoding boolean values, that do no need to initialize parser
     if (zend_string_equals_cstr(json, "true", 4)) {
         RETURN_TRUE;
     } else if (zend_string_equals_cstr(json, "false", 5)) {
