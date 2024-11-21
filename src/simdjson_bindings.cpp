@@ -146,6 +146,14 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
 }
 
 #if PHP_VERSION_ID >= 80200
+// Initialize repeated table that holds repeated keys
+static zend_always_inline void simdjson_initialize_repeated_key_table(HashTable* table) {
+    zend_hash_init(table, SIMDJSON_REPEATED_STRINGS_COUNT, NULL, NULL, 0);
+    zend_hash_real_init_mixed(table);
+    // Hack: Tell PHP that we use static keys, so it will not decrement reference counter when we clean this hash table
+    HT_FLAGS(table) &= HASH_FLAG_STATIC_KEYS;
+}
+
 // Exact copy of PHP method zend_hash_str_find_bucket that is not exported
 static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h)
 {
@@ -168,15 +176,6 @@ static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashT
 	return NULL;
 }
 
-#define SIMDJSON_REPEATED_STRINGS_COUNT 256
-
-static inline void simdjson_initialize_repeated_key_table(HashTable* table) {
-    zend_hash_init(table, SIMDJSON_REPEATED_STRINGS_COUNT, NULL, NULL, 0);
-    zend_hash_real_init_mixed(table);
-    // Hack: Tell PHP that we use static keys, so it will not decrement reference counter when we clean this hash table
-    HT_FLAGS(table) &= HASH_FLAG_STATIC_KEYS;
-}
-
 /*
  * Usually in JSON, keys repeat multiple times in one document, so doesn't make sense to allocated them again and again
  * This method check if key was already used in same JSON document and returns a reference or allocate new string if
@@ -191,6 +190,7 @@ static zend_always_inline zend_string* simdjson_reuse_key(const char *str, size_
     HashTable* ht = repeated_key_strings;
 
     // This should make computation faster, as we know array size
+    ZEND_ASSERT(ht != NULL);
     ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_REPEATED_STRINGS_COUNT));
 
     p = simdjson_zend_hash_str_find_bucket(ht, str, len, h);
@@ -437,21 +437,9 @@ static inline void create_array(const simdjson::dom::element element, zval *retu
         EMPTY_SWITCH_DEFAULT_CASE();
     }
 }
-
-static zend_always_inline void simdjson_create_array_start(const simdjson::dom::element element, zval *return_value) {
-    HashTable repeated_key_strings;
-#if PHP_VERSION_ID >= 80200
-    simdjson_initialize_repeated_key_table(&repeated_key_strings);
-#endif
-    create_array(element, return_value, &repeated_key_strings);
-#if PHP_VERSION_ID >= 80200
-    zend_hash_destroy(&repeated_key_strings);
-#endif
-}
-
 /* }}} */
 
-static simdjson_php_error_code create_object(simdjson::dom::element element, zval *return_value) /* {{{ */ {
+static simdjson_php_error_code create_object(simdjson::dom::element element, zval *return_value, HashTable *repeated_key_strings) /* {{{ */ {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -488,14 +476,18 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                     zval zv;
                     ZVAL_NULL(&zv);
                     zval* next_array_element = zend_hash_next_index_insert_new(arr, &zv);
-                    create_object(child, next_array_element);
+                    simdjson_php_error_code error = create_object(child, next_array_element, repeated_key_strings);
+                    if (UNEXPECTED(error)) {
+                        zval_ptr_dtor(return_value);
+                        ZVAL_NULL(return_value);
+                        return error;
+                    }
                 }
             } else {
                 zend_array *arr = simdjson_packed_array_init(return_value, array_size);
-
                 for (simdjson::dom::element child : json_array) {
                     zval* value = simdjson_packed_array_next(arr);
-                    simdjson_php_error_code error = create_object(child, value);
+                    simdjson_php_error_code error = create_object(child, value, repeated_key_strings);
                     if (UNEXPECTED(error)) {
                         zval_ptr_dtor(return_value);
                         ZVAL_NULL(return_value);
@@ -523,7 +515,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                     return SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY;
                 }
                 zval value;
-                simdjson_php_error_code error = create_object(field.value, &value);
+                simdjson_php_error_code error = create_object(field.value, &value, repeated_key_strings);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
@@ -536,7 +528,12 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 if (UNEXPECTED(size <= 1)) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
+#if PHP_VERSION_ID >= 80200
+                    zend_ulong h = zend_inline_hash_func(data, size);
+                    key = simdjson_reuse_key(data, size, h, repeated_key_strings);
+#else
                     key = simdjson_string_init(data, size);
+#endif
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
@@ -568,6 +565,39 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
     return simdjson::SUCCESS;
 }
 
+static zend_always_inline simdjson_php_error_code simdjson_convert_to_zval(bool associative, const simdjson::dom::element element, zval *return_value) {
+#if PHP_VERSION_ID >= 80200
+    HashTable repeated_key_strings;
+    // Check if first element of document is array or object – if it is for example integer, doesn't make sense to initialize
+    // table for repeated key strings
+    bool is_complex = element.type() == simdjson::dom::element_type::ARRAY || element.type() == simdjson::dom::element_type::OBJECT;
+    if (is_complex) {
+        simdjson_initialize_repeated_key_table(&repeated_key_strings);
+    }
+
+    simdjson_php_error_code error;
+    if (associative) {
+        // Converting to array could not fail
+        create_array(element, return_value, &repeated_key_strings);
+        error = simdjson::SUCCESS;
+    } else {
+        error = create_object(element, return_value, &repeated_key_strings);
+    }
+    if (is_complex) {
+        zend_hash_destroy(&repeated_key_strings);
+    }
+    return error;
+#else
+    if (associative) {
+        // Converting to array could not fail
+        create_array(element, return_value, NULL);
+        return simdjson::SUCCESS;
+    } else {
+        return create_object(element, return_value, NULL);
+    }
+#endif
+}
+
 /* }}} */
 
 PHP_SIMDJSON_API simdjson_php_parser* php_simdjson_create_parser(void) /* {{{ */ {
@@ -595,14 +625,9 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser*
 
     simdjson::dom::element doc;
     SIMDJSON_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), realloc_if_needed, depth));
-
-    if (associative) {
-        simdjson_create_array_start(doc, return_value);
-        return simdjson::SUCCESS;
-    } else {
-        return create_object(doc, return_value);
-    }
+    return simdjson_convert_to_zval(associative, doc, return_value);
 }
+
 /* }}} */
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, bool associative,
                               size_t depth) /* {{{ */ {
@@ -610,12 +635,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_par
     simdjson::dom::element element;
     SIMDJSON_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
     SIMDJSON_TRY(get_key_with_optional_prefix(doc, key).get(element));
-    if (associative) {
-        simdjson_create_array_start(element, return_value);
-        return simdjson::SUCCESS;
-    } else {
-        return create_object(element, return_value);
-    }
+    return simdjson_convert_to_zval(associative, element, return_value);
 }
 
 /* }}} */
