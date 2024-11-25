@@ -1,5 +1,5 @@
 name: CI
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
   PHP84-alpine:
@@ -151,6 +151,13 @@ jobs:
           # for correct php-config extension dir, see https://github.com/shivammathur/setup-php/issues/147
           tools: pecl, phpize, php-config
 
+      - name: Setup php-fpm
+        env:
+          version: ${{ matrix.php }}
+        run: |
+          sudo apt-get install php$version-fpm nginx
+          sudo cp /usr/sbin/php-fpm$version /usr/bin/php-fpm # copy to /usr/bin
+
       - name: "Build extension"
         run: |
           php-config --extension-dir
@@ -165,6 +172,17 @@ jobs:
           export REPORT_EXIT_STATUS=1
           export SIMDJSON_HIGH_MEMORY_TESTS=1
           make test TESTS="--show-diff"
+
+      - name: "Test on FPM"
+        env:
+          version: ${{ matrix.php }}
+        run: |
+          sudo server php-fpm restart
+          sudo cp .github/nginx.conf /etc/nginx/nginx.conf
+          sudo nginx -t
+          sudo nginx
+          sudo cp .github/index.php /var/www/html/
+          curl -v http://localhost/index.php
 
       - name: "Show extension information"
         run: "php -dextension=simdjson.so --ri simdjson"
