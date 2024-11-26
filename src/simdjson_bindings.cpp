@@ -54,6 +54,14 @@ get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_
     return doc.at_pointer(std_pointer);
 }
 
+static zend_always_inline zend_string* simdjson_string_init(const char* buf, const size_t len) {
+    zend_string *str = zend_string_init(buf, len, 0);
+#ifdef IS_STR_VALID_UTF8
+    GC_ADD_FLAGS(str, IS_STR_VALID_UTF8); // JSON string must be always valid UTF-8 string
+#endif
+    return str;
+}
+
 static simdjson::error_code
 build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc, const char *buf, size_t len, bool realloc_if_needed,
                        size_t depth = simdjson::DEFAULT_MAX_DEPTH) {
@@ -93,7 +101,7 @@ build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc,
 static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *buf, size_t len) {
     /* In php 7.1, the ZSTR_CHAR macro doesn't exist, and CG(one_char_string)[chr] may or may not be null */
 #if PHP_VERSION_ID >= 70200
-    if (len <= 1) {
+    if (UNEXPECTED(len <= 1)) {
         /*
         A note on performance benefits of the use of interned strings here and elsewhere:
 
@@ -111,7 +119,8 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
         return;
     }
 #endif
-    ZVAL_STRINGL(v, buf, len);
+    zend_string *str = simdjson_string_init(buf, len);
+    ZVAL_NEW_STR(v, str);
 }
 
 static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value) {
@@ -125,7 +134,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         return;
     }
 #endif
-    zend_string *key = zend_string_init(buf, len, 0);
+    zend_string *key = simdjson_string_init(buf, len);
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
@@ -208,7 +217,6 @@ static simdjson_php_error_code create_array(simdjson::dom::element element, zval
                     ZVAL_NULL(return_value);
                     return error;
                 }
-                /* TODO consider using zend_string_init_existing_interned in php 8.1+ to save memory and time freeing strings. */
                 simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element);
             }
             break;
@@ -297,7 +305,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 if (size <= 1) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
-                    key = zend_string_init(data, size, 0);
+                    key = simdjson_string_init(data, size);
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
@@ -313,7 +321,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
 # endif
                 {
                     zval zkey;
-                    ZVAL_STRINGL(&zkey, data, size);
+                    ZVAL_NEW_STR(&zkey, simdjson_string_init(data, size));
                     zend_std_write_property(return_value, &zkey, &value, NULL);
                     zval_ptr_dtor_nogc(&zkey);
                 }
