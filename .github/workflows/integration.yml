@@ -1,13 +1,39 @@
 name: CI
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
+  PHP84-alpine:
+     name: PHP 8.4 Alpine 3.19
+     runs-on: ubuntu-latest
+     steps:
+       - name: "Checkout"
+         uses: actions/checkout@v4
+
+       - name: "Build extension"
+         run: "docker build -t simdjsontest -f docker_php8.4-alpine ."
+
+       - name: "Show"
+         run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
+
+  PHP83-alpine:
+    name: PHP 8.3 Alpine 3.17
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Build extension"
+        run: "docker build -t simdjsontest -f docker_php8.3-alpine ."
+
+      - name: "Show"
+        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
+
   PHP82-alpine:
     name: PHP 8.2 Alpine 3.16
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php8.2-alpine ."
@@ -20,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php8.1-alpine ."
@@ -33,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php8.0-alpine ."
@@ -46,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php7.4-alpine ."
@@ -59,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php7.3-alpine ."
@@ -72,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php7.2-alpine ."
@@ -85,7 +111,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Build extension"
         run: "docker build -t simdjsontest -f docker_php7.1-alpine ."
@@ -105,6 +131,9 @@ jobs:
           - "7.4"
           - "8.0"
           - "8.1"
+          - "8.2"
+          - "8.3"
+          - "8.4"
         os: [ubuntu-latest]
         experimental: [false]
     runs-on: ${{ matrix.os }}
@@ -112,7 +141,7 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: "Install PHP"
         uses: shivammathur/setup-php@v2
@@ -121,19 +150,41 @@ jobs:
           extensions: json
           # for correct php-config extension dir, see https://github.com/shivammathur/setup-php/issues/147
           tools: pecl, phpize, php-config
+
+      - name: Setup php-fpm
+        env:
+          version: ${{ matrix.php }}
+        run: |
+          sudo apt-get install php$version-fpm nginx
+          sudo cp /usr/sbin/php-fpm$version /usr/bin/php-fpm # copy to /usr/bin
+
       - name: "Build extension"
         run: |
-          export NO_INTERACTION=true
-          export REPORT_EXIT_STATUS=1
-          export SIMDJSON_HIGH_MEMORY_TESTS=1
           php-config --extension-dir
           phpize
           ./configure
           make
           sudo make install
-          make test TESTS="--show-diff" || exit 1
 
-      - name: "Show"
+      - name: "Test"
+        run: |
+          export NO_INTERACTION=true
+          export REPORT_EXIT_STATUS=1
+          export SIMDJSON_HIGH_MEMORY_TESTS=1
+          make test TESTS="--show-diff"
+
+      - name: "Test on FPM"
+        env:
+          version: ${{ matrix.php }}
+        run: |
+          sudo server php-fpm restart
+          sudo cp .github/nginx.conf /etc/nginx/nginx.conf
+          sudo nginx -t
+          sudo nginx
+          sudo cp .github/index.php /var/www/html/
+          curl -v http://localhost/index.php
+
+      - name: "Show extension information"
         run: "php -dextension=simdjson.so --ri simdjson"
 
       - name: "Error log"

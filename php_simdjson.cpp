@@ -43,6 +43,10 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 #define RETURN_THROWS() do { ZEND_ASSERT(EG(exception)); (void) return_value; return; } while (0)
 #endif
 
+#ifndef RETURN_EMPTY_ARRAY
+#define RETURN_EMPTY_ARRAY() do { array_init(return_value); return; } while (0)
+#endif
+
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
 #if PHP_VERSION_ID >= 70200
@@ -84,6 +88,16 @@ SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_key_count_arginfo, 0, 
         ZEND_ARG_TYPE_INFO(0, throw_if_uncountable, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
+SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_is_valid_utf8_arginfo, 0, 0, _IS_BOOL, 0)
+        ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_capacity_arginfo, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_cleanup_arginfo, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 #define SIMDJSON_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(simdjson, v)
 static simdjson_php_parser *simdjson_get_parser() {
     simdjson_php_parser *parser = SIMDJSON_G(parser);
@@ -93,10 +107,6 @@ static simdjson_php_parser *simdjson_get_parser() {
         ZEND_ASSERT(parser != NULL);
     }
     return parser;
-}
-
-PHP_SIMDJSON_API struct simdjson_php_parser *php_simdjson_get_default_singleton_parser(void) {
-    return simdjson_get_parser();
 }
 
 // The simdjson parser accepts strings with at most 32-bit lengths, for now.
@@ -123,36 +133,78 @@ static zend_always_inline bool simdjson_validate_depth(zend_long depth, const ch
 PHP_FUNCTION (simdjson_is_valid) {
     zend_string *json = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|l", &json, &depth) == FAILURE) {
-        RETURN_THROWS();
-    }
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_STR(json)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
     if (!simdjson_validate_depth(depth, "simdjson_is_valid", 2)) {
         RETURN_THROWS();
     }
-    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), depth);
+
+    // Fast track when validity check for empty JSON object, so we don't need to initialize parser
+    if (ZSTR_LEN(json) == 2) {
+        if (ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+            RETURN_TRUE;
+        } else if (ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
+            RETURN_TRUE;
+        }
+    }
+
+#if PHP_VERSION_ID >= 80200
+    // Fast track when validating boolean values, that do no need to initialize parser
+    if (zend_string_equals_cstr(json, "true", 4) || zend_string_equals_cstr(json, "false", 5)) {
+        RETURN_TRUE;
+    }
+#endif
+
+    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
     ZVAL_BOOL(return_value, !error);
-}
-
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse_default(const char *json, size_t len, zval *return_value, bool associative, size_t depth) {
-    return php_simdjson_parse(simdjson_get_parser(), json, len, return_value, associative, depth);
-}
-
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate_default(const char *json, size_t len, size_t depth) {
-    return php_simdjson_validate(simdjson_get_parser(), json, len, depth);
 }
 
 PHP_FUNCTION (simdjson_decode) {
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
     zend_string *json = NULL;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "S|bl", &json, &associative, &depth) == FAILURE) {
-        RETURN_THROWS();
-    }
+
+    ZEND_PARSE_PARAMETERS_START(1, 3)
+        Z_PARAM_STR(json)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(associative)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
     if (!simdjson_validate_depth(depth, "simdjson_decode", 2)) {
         RETURN_THROWS();
     }
-    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), return_value, associative, depth);
-    if (error) {
+
+    // Fast track when decoding empty JSON object or array, so we don't need to initialize parser
+    if (ZSTR_LEN(json) == 2) {
+        if (ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+            if (associative) {
+                RETURN_EMPTY_ARRAY();
+            } else {
+                object_init(return_value);
+                return;
+            }
+        } else if (ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
+            RETURN_EMPTY_ARRAY();
+        }
+    }
+
+#if PHP_VERSION_ID >= 80200
+    // Fast track when decoding boolean values, that do no need to initialize parser
+    if (zend_string_equals_cstr(json, "true", 4)) {
+        RETURN_TRUE;
+    } else if (zend_string_equals_cstr(json, "false", 5)) {
+        RETURN_FALSE;
+    }
+#endif
+
+    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth);
+    if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);
         RETURN_THROWS();
     }
@@ -221,6 +273,50 @@ PHP_FUNCTION (simdjson_key_exists) {
     }
 }
 
+PHP_FUNCTION (simdjson_is_valid_utf8) {
+    zend_string *string = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_STR(string)
+    ZEND_PARSE_PARAMETERS_END();
+
+#ifdef ZSTR_IS_VALID_UTF8
+    // If string was already successfully validated, just return true
+    if (ZSTR_IS_VALID_UTF8(string)) {
+        RETURN_TRUE;
+    }
+#endif
+
+    bool is_ok = simdjson::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
+
+#ifdef IS_STR_VALID_UTF8
+    if (is_ok) {
+        // String is UTF-8 valid, so we can also set proper flag
+        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+    }
+#endif
+
+    RETURN_BOOL(is_ok);
+}
+
+PHP_FUNCTION (simdjson_capacity) {
+    simdjson_php_parser *parser = SIMDJSON_G(parser);
+    if (parser == NULL) {
+        RETURN_LONG(0);
+    } else {
+        RETURN_LONG(parser->parser.capacity());
+    }
+}
+
+PHP_FUNCTION (simdjson_cleanup) {
+    simdjson_php_parser *parser = SIMDJSON_G(parser);
+    if (parser != NULL) {
+        php_simdjson_free_parser(parser);
+        SIMDJSON_G(parser) = NULL;
+    }
+    RETURN_TRUE;
+}
+
 /* {{{ simdjson_functions[]
 */
 zend_function_entry simdjson_functions[] = {
@@ -229,6 +325,9 @@ zend_function_entry simdjson_functions[] = {
     PHP_FE(simdjson_key_value, simdjson_key_value_arginfo)
     PHP_FE(simdjson_key_exists, simdjson_key_exists_arginfo)
     PHP_FE(simdjson_key_count, simdjson_key_count_arginfo)
+    PHP_FE(simdjson_is_valid_utf8, simdjson_is_valid_utf8_arginfo)
+    PHP_FE(simdjson_capacity, simdjson_capacity_arginfo)
+    PHP_FE(simdjson_cleanup, simdjson_cleanup_arginfo)
     {NULL, NULL, NULL}
 };
 /* }}} */

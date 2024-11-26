@@ -28,13 +28,13 @@ var_dump(compat_decode("\"\x00\""));
 var_dump(SIMDJSON_ERR_UNESCAPED_CHARS);
 ?>
 --EXPECTF--
-string(43) "SimdJsonException: 12: Empty: no JSON found"
-string(43) "SimdJsonException: 12: Empty: no JSON found"
+string(%d) "SimdJsonException: %d: no JSON found"
+string(%d) "SimdJsonException: %d: no JSON found"
 int(0)
 int(1)
 int(1)
 string(%d) "SimdJsonException: %d: %s
 string(124) "SimdJsonException: 3: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc."
-string(51) "SimdJsonException: 10: The input is not valid UTF-8"
-string(101) "SimdJsonException: 13: Within strings, some characters must be escaped, we found unescaped characters"
-int(13)
+string(51) "SimdJsonException: %d: The input is not valid UTF-8"
+string(101) "SimdJsonException: %d: Within strings, some characters must be escaped, we found unescaped characters"
+int(%d)
