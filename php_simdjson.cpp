@@ -95,7 +95,7 @@ PHP_FUNCTION(simdjson_validate) {
     if (!simdjson_validate_depth(depth, 2)) {
         RETURN_THROWS();
     }
-    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), depth);
+    simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), json, depth);
     simdjson_parser_cleanup();
     ZVAL_BOOL(return_value, !error);
 }
@@ -148,7 +148,7 @@ PHP_FUNCTION(simdjson_decode) {
         return;
     }
 
-    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), return_value, associative, depth);
+    simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), json, return_value, associative, depth);
     simdjson_parser_cleanup();
     if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);
