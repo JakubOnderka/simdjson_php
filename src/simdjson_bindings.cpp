@@ -69,6 +69,24 @@ static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint3
     return arr;
 }
 
+/* Returns the default size of the page in bytes on this system.*/
+static long inline page_size() {
+#ifdef _WIN32
+  SYSTEM_INFO sysInfo;
+  GetSystemInfo(&sysInfo);
+  long pagesize = sysInfo.dwPageSize;
+#else
+  long pagesize = sysconf(_SC_PAGESIZE);
+#endif
+  return pagesize;
+}
+
+/** Check if it is necessary to reallocate string to buffer */
+static inline bool simdjson_realloc_needed(const char *buf, size_t len) {
+    return ((reinterpret_cast<uintptr_t>(buf + len - 1) % page_size())
+        + simdjson::SIMDJSON_PADDING > static_cast<uintptr_t>(page_size()));
+}
+
 static simdjson::error_code
 build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc, const char *buf, size_t len, bool realloc_if_needed,
                        size_t depth = simdjson::DEFAULT_MAX_DEPTH) {
@@ -352,14 +370,14 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const char *json, size_t len, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
     /* The depth is passed in to ensure this behaves the same way for the same arguments */
-    return build_parsed_json_cust(parser, doc, json, len, true, depth);
+    return build_parsed_json_cust(parser, doc, json, len, simdjson_realloc_needed(json, len), depth);
 }
 
 /* }}} */
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
-    simdjson::error_code error = build_parsed_json_cust(parser, doc, json, len, true, depth);
+    simdjson::error_code error = build_parsed_json_cust(parser, doc, json, len, simdjson_realloc_needed(json, len), depth);
     if (error) {
         return error;
     }
