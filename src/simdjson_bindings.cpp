@@ -71,6 +71,22 @@ static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint3
     return arr;
 }
 
+/** Check if it is necessary to reallocate string to buffer */
+static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) {
+    if (EXPECTED(!(GC_FLAGS(json) & IS_STR_PERSISTENT))) { // it is not possible to check allocated size for persistent string
+        size_t allocated = zend_mem_block_size((void*)json);
+        if (UNEXPECTED(allocated == 0)) {
+            return true;
+        }
+        size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(json));
+        size_t free_space = allocated - struct_size;
+        if (free_space >= simdjson::SIMDJSON_PADDING) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static simdjson::error_code
 build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc, const char *buf, size_t len, bool realloc_if_needed,
                        size_t depth = simdjson::DEFAULT_MAX_DEPTH) {
@@ -435,18 +451,17 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
     delete parser;
 }
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const char *json, size_t len, size_t depth) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
     /* The depth is passed in to ensure this behaves the same way for the same arguments */
-    return build_parsed_json_cust(parser, doc, json, len, true, depth);
+    return build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth);
 }
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
-
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
 
     if (associative) {
         return create_array(doc, return_value);
