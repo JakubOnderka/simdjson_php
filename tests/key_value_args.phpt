@@ -15,4 +15,5 @@ Function [ <internal:simdjson> function simdjson_key_value ] {
     Parameter #2 [ <optional> bool%S $assoc%S ]
     Parameter #3 [ <optional> int%S $depth%S ]
   }
+  - Return [ mixed ]
 }

@@ -18,8 +18,10 @@ extern "C" {
 
 #include "php.h"
 #include "zend_exceptions.h"
+#include "zend_smart_str.h"
 #include "main/SAPI.h"
 #include "ext/standard/info.h"
+#include "ext/standard/flock_compat.h"
 #include "ext/spl/spl_exceptions.h"
 
 #include "php_simdjson.h"
@@ -35,6 +37,7 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 
 /* C++ header file for simdjson_php helper methods/classes */
 #include "src/simdjson_bindings_defs.h"
+#include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
 #include "src/simdjson.h"
 
@@ -44,48 +47,6 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 #endif
 
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
-
-#if PHP_VERSION_ID >= 70200
-#define SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(name, return_reference, required_num_args, type, allow_null) \
-    ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(name, return_reference, required_num_args, type, allow_null)
-#else
-#define SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(name, return_reference, required_num_args, type, allow_null) \
-    ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(name, return_reference, required_num_args, type, NULL, allow_null)
-#endif
-
-SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_is_valid_arginfo, 0, 1, _IS_BOOL, 0)
-        ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, depth, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(simdjson_decode_arginfo, 0, 0, 1)
-        ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, associative, _IS_BOOL, 0)
-        ZEND_ARG_TYPE_INFO(0, depth, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(simdjson_key_value_arginfo, 0, 0, 2)
-        ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, associative, _IS_BOOL, 0)
-        ZEND_ARG_TYPE_INFO(0, depth, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_key_exists_arginfo, 0, 2, _IS_BOOL, 0)
-        ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, depth, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_key_count_arginfo, 0, 2, IS_LONG, 0)
-        ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
-        ZEND_ARG_TYPE_INFO(0, depth, IS_LONG, 0)
-        ZEND_ARG_TYPE_INFO(0, throw_if_uncountable, _IS_BOOL, 0)
-ZEND_END_ARG_INFO()
-
-SIMDJSON_ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(simdjson_cleanup_arginfo, 0, 0, _IS_BOOL, 0)
-ZEND_END_ARG_INFO()
 
 #define SIMDJSON_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(simdjson, v)
 static simdjson_php_parser *simdjson_get_parser() {
@@ -252,18 +213,114 @@ PHP_FUNCTION (simdjson_cleanup) {
     RETURN_TRUE;
 }
 
-/* {{{ simdjson_functions[]
-*/
-zend_function_entry simdjson_functions[] = {
-    PHP_FE(simdjson_is_valid, simdjson_is_valid_arginfo)
-    PHP_FE(simdjson_decode, simdjson_decode_arginfo)
-    PHP_FE(simdjson_key_value, simdjson_key_value_arginfo)
-    PHP_FE(simdjson_key_exists, simdjson_key_exists_arginfo)
-    PHP_FE(simdjson_key_count, simdjson_key_count_arginfo)
-    PHP_FE(simdjson_cleanup, simdjson_cleanup_arginfo)
-    {NULL, NULL, NULL}
-};
-/* }}} */
+static const char *php_json_get_error_msg(simdjson_error_code error_code)
+{
+    switch(error_code) {
+        case SIMDJSON_ERROR_NONE:
+            return "No error";
+        case SIMDJSON_ERROR_DEPTH:
+            return "Maximum stack depth exceeded";
+        case SIMDJSON_ERROR_STATE_MISMATCH:
+            return "State mismatch (invalid or malformed JSON)";
+        case SIMDJSON_ERROR_CTRL_CHAR:
+            return "Control character error, possibly incorrectly encoded";
+        case SIMDJSON_ERROR_SYNTAX:
+            return "Syntax error";
+        case SIMDJSON_ERROR_UTF8:
+            return "Malformed UTF-8 characters, possibly incorrectly encoded";
+        case SIMDJSON_ERROR_RECURSION:
+            return "Recursion detected";
+        case SIMDJSON_ERROR_INF_OR_NAN:
+            return "Inf and NaN cannot be JSON encoded";
+        case SIMDJSON_ERROR_UNSUPPORTED_TYPE:
+            return "Type is not supported";
+        case SIMDJSON_ERROR_INVALID_PROPERTY_NAME:
+            return "The decoded property name is invalid";
+        case SIMDJSON_ERROR_UTF16:
+            return "Single unpaired UTF-16 surrogate in unicode escape";
+        case SIMDJSON_ERROR_NON_BACKED_ENUM:
+            return "Non-backed enums have no default serialization";
+        case SIMDJSON_ERROR_STREAM_WRITE:
+            return "Stream write error";
+        default:
+            return "Unknown error";
+    }
+}
+
+PHP_FUNCTION(simdjson_encode)
+{
+    zval *parameter;
+    simdjson_encoder encoder = {0};
+    smart_str buf = {0};
+    zend_long options = 0;
+    zend_long depth = 512;
+
+    ZEND_PARSE_PARAMETERS_START(1, 3)
+        Z_PARAM_ZVAL(parameter)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(options)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
+    encoder.max_depth = (int)depth;
+    smart_str_erealloc(&buf, 200);
+    simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
+
+    if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
+        efree(buf.s);
+        zend_throw_exception(simdjson_exception_ce, php_json_get_error_msg(encoder.error_code), encoder.error_code);
+        RETURN_THROWS();
+    }
+
+    RETURN_STR(smart_str_extract(&buf));
+}
+
+PHP_FUNCTION(simdjson_encode_to_stream)
+{
+    zval *res;
+    zval *parameter;
+    simdjson_encoder encoder = {0};
+    smart_str buf = {0};
+    zend_long options = 0;
+    zend_long depth = 512;
+    php_stream *stream;
+
+    ZEND_PARSE_PARAMETERS_START(2, 4)
+        Z_PARAM_ZVAL(parameter)
+        Z_PARAM_RESOURCE(res)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(options)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
+    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
+    php_stream_from_res(stream, Z_RES_P(res));
+
+    encoder.max_depth = (int)depth;
+    encoder.stream = stream;
+
+    if (php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_EX)) {
+        php_error_docref(NULL, E_WARNING, "Could not lock stream for writing");
+        RETURN_FALSE;
+    }
+
+    smart_str_erealloc(&buf, 1024 * 8);
+    simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
+    simdjson_encode_write_stream(&buf, &encoder); // write rest
+    efree(buf.s);
+
+    if (php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_UN)) {
+        php_error_docref(NULL, E_WARNING, "Could not unlock stream");
+        RETURN_FALSE;
+    }
+
+    if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
+        zend_throw_exception(simdjson_exception_ce, php_json_get_error_msg(encoder.error_code), encoder.error_code);
+        RETURN_THROWS();
+    }
+
+    RETURN_TRUE;
+}
 
 /** {{{ PHP_GINIT_FUNCTION
 */
@@ -376,7 +433,7 @@ zend_module_entry simdjson_module_entry = {
     STANDARD_MODULE_HEADER_EX, NULL,
     simdjson_deps,
     "simdjson",
-    simdjson_functions,
+    ext_functions,
     PHP_MINIT(simdjson),
     PHP_MSHUTDOWN(simdjson),
     PHP_RINIT(simdjson),

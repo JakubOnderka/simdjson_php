@@ -34,6 +34,7 @@ if test "$PHP_SIMDJSON" != "no"; then
   PHP_NEW_EXTENSION(simdjson, [
       php_simdjson.cpp                    \
       src/simdjson_bindings.cpp           \
+      src/simdjson_encoder.cpp            \
       src/simdjson.cpp],
     $ext_shared,, "-std=c++17 -DZEND_ENABLE_STATIC_TSRMLS_CACHE=1 -DSIMDJSON_EXCEPTIONS=0 -DSIMDJSON_DEVELOPMENT_CHECKS=0", cxx)
 

@@ -11,7 +11,8 @@ Function [ <internal:simdjson> function simdjson_decode ] {
 
   - Parameters [3] {
     Parameter #0 [ <required> string $json ]
-    Parameter #1 [ <optional> bool%S $assoc%S ]
-    Parameter #2 [ <optional> int%S $depth%S ]
+    Parameter #1 [ <optional> bool $associative%s ]
+    Parameter #2 [ <optional> int $depth%s ]
   }
+  - Return [ mixed ]
 }
