@@ -25,7 +25,6 @@ extern "C" {
 #include "ext/spl/spl_exceptions.h"
 
 #include "php_simdjson.h"
-#include "simdjson_arginfo.h"
 
 /**
  * Both the declaration and the definition of PHP_SIMDJSON_API variables, functions must be within an 'extern "C"' block for Windows
@@ -40,6 +39,9 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 #include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
 #include "src/simdjson.h"
+
+
+#include "simdjson_arginfo.h"
 
 /* Define RETURN_THROWS macro in older php versions */
 #ifndef RETURN_THROWS
@@ -374,6 +376,8 @@ PHP_MINIT_FUNCTION (simdjson) {
     SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(TRAILING_CONTENT);           ///< Unexpected trailing content in the JSON input
     SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(KEY_COUNT_NOT_COUNTABLE, SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE); ///< JSON pointer refers to a value that cannot be counted
     SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(INVALID_PROPERTY, SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY); ///< Invalid property name
+
+    register_simdjson_symbols(0);
 
     return SUCCESS;
 }

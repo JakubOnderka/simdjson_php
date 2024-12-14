@@ -2,6 +2,53 @@
 
 /** @generate-class-entries */
 
+/**
+ * @var int
+ * @cvalue SIMDJSON_PRETTY_PRINT
+ */
+const SIMDJSON_PRETTY_PRINT = UNKNOWN;
+
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_NONE
+ */
+const SIMDJSON_ERROR_NONE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_DEPTH
+ */
+const SIMDJSON_ERROR_DEPTH = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_UTF8
+ */
+const SIMDJSON_ERROR_UTF8 = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_RECURSION
+ */
+const SIMDJSON_ERROR_RECURSION = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_INF_OR_NAN
+ */
+const SIMDJSON_ERROR_INF_OR_NAN = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_UNSUPPORTED_TYPE
+ */
+const SIMDJSON_ERROR_UNSUPPORTED_TYPE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_INVALID_PROPERTY_NAME
+ */
+const SIMDJSON_ERROR_INVALID_PROPERTY_NAME = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_ERROR_NON_BACKED_ENUM
+ */
+const SIMDJSON_ERROR_NON_BACKED_ENUM = UNKNOWN;
+
 function simdjson_is_valid(string $json,int $depth = 512): bool {}
 
 function simdjson_decode(string $json, bool $associative = false, int $depth = 512): mixed {}
