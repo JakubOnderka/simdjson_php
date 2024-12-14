@@ -124,8 +124,9 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
   	zval* data;
 
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
+    ZEND_ASSERT(recursion_rc != NULL);
 
-	if (recursion_rc && GC_IS_RECURSIVE(recursion_rc)) {
+	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -148,14 +149,13 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 
 	SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 
-	if (encoder->depth > encoder->max_depth) {
+	if (UNEXPECTED(encoder->depth > encoder->max_depth)) {
 		encoder->error_code = SIMDJSON_ERROR_DEPTH;
 		return FAILURE;
 	}
 	--encoder->depth;
 
 	simdjson_pretty_print_nl_ident(buf, options, encoder);
-
 	smart_str_appendc(buf, ']');
 
     return SUCCESS;
@@ -164,9 +164,14 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table, int options, simdjson_encoder *encoder)
 {
 	int need_comma = 0;
-	zend_refcounted *recursion_rc = (zend_refcounted *)table;
+	zend_string *key;
+	zval *data;
+	zend_ulong index;
 
-	if (recursion_rc && GC_IS_RECURSIVE(recursion_rc)) {
+	zend_refcounted *recursion_rc = (zend_refcounted *)table;
+	ZEND_ASSERT(recursion_rc != NULL);
+
+	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -175,10 +180,6 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
 	smart_str_appendc(buf, '{');
 	++encoder->depth;
-
-	zend_string *key;
-	zval *data;
-	zend_ulong index;
 
 	ZEND_HASH_FOREACH_KEY_VAL_IND(table, index, key, data) {
 		if (need_comma) {
@@ -190,8 +191,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 
 		if (EXPECTED(key)) {
-			if (simdjson_escape_string(buf, key,
-						encoder) == FAILURE) {
+			if (UNEXPECTED(simdjson_escape_string(buf, key, encoder) == FAILURE)) {
 				SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 				return FAILURE;
 			}
@@ -203,7 +203,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
 		simdjson_pretty_print_colon(buf, options);
 
-		if (simdjson_encode_zval(buf, data, options, encoder) == FAILURE) {
+		if (UNEXPECTED(simdjson_encode_zval(buf, data, options, encoder) == FAILURE)) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 			return FAILURE;
 		}
@@ -211,7 +211,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
 	SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 
-	if (encoder->depth > encoder->max_depth) {
+	if (UNEXPECTED(encoder->depth > encoder->max_depth)) {
 		encoder->error_code = SIMDJSON_ERROR_DEPTH;
 		return FAILURE;
 	}
@@ -221,7 +221,6 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	if (need_comma) {
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 	}
-
 	smart_str_appendc(buf, '}');
 
 	return SUCCESS;
@@ -245,7 +244,6 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 	SIMDJSON_HASH_PROTECT_RECURSION(obj);
 
 	smart_str_appendc(buf, '{');
-
 	++encoder->depth;
 
 	for (int i = 0; i < ce->default_properties_count; i++) {
@@ -270,8 +268,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 
-		if (simdjson_escape_string(buf, prop_info->name,
-				encoder) == FAILURE) {
+		if (simdjson_escape_string(buf, prop_info->name, encoder) == FAILURE) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
 			return FAILURE;
 		}
@@ -301,8 +298,8 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 static zend_always_inline bool simdjson_is_simple_object(zval *val)
 {
 	return Z_OBJ_P(val)->properties == NULL
-	   && Z_OBJ_HT_P(val)->get_properties_for == NULL
-	   && Z_OBJ_HT_P(val)->get_properties == zend_std_get_properties
+		&& Z_OBJ_HT_P(val)->get_properties_for == NULL
+		&& Z_OBJ_HT_P(val)->get_properties == zend_std_get_properties
 #if PHP_VERSION_ID >= 80400
 		&& Z_OBJ_P(val)->ce->num_hooked_props == 0
  		&& !zend_object_is_lazy(Z_OBJ_P(val))
@@ -310,10 +307,10 @@ static zend_always_inline bool simdjson_is_simple_object(zval *val)
         ;
 }
 
-static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options, simdjson_encoder *encoder) /* {{{ */
+static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
 {
 	int need_comma = 0;
-	HashTable *myht, *prop_ht;
+	HashTable *myht;
 	zend_refcounted *recursion_rc;
 
 	if (simdjson_check_stack_limit()) {
@@ -340,22 +337,22 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 	}
 
 	zend_object *obj = Z_OBJ_P(val);
-	prop_ht = myht = zend_get_properties_for(val, ZEND_PROP_PURPOSE_JSON);
+	myht = zend_get_properties_for(val, ZEND_PROP_PURPOSE_JSON);
 #if PHP_VERSION_ID >= 80400
 	if (obj->ce->num_hooked_props == 0) {
-		recursion_rc = (zend_refcounted *)prop_ht;
-	} else {*/
+		recursion_rc = (zend_refcounted *)myht;
+	} else {
 		/* Protecting the object itself is fine here because myht is temporary and can't be
 		 * referenced from a different place in the object graph. */
 		recursion_rc = (zend_refcounted *)obj;
 	}
 #else
-    recursion_rc = (zend_refcounted *)prop_ht;
+    recursion_rc = (zend_refcounted *)myht;
 #endif
 
 	if (recursion_rc && GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
-		zend_release_properties(prop_ht);
+		zend_release_properties(myht);
 		return FAILURE;
 	}
 
@@ -365,7 +362,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 	++encoder->depth;
 
-	uint32_t i = myht ? zend_hash_num_elements(myht) : 0;
+	uint32_t i = zend_hash_num_elements(myht);
 
 	if (i > 0) {
 		zend_string *key;
@@ -391,7 +388,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 					zend_read_property_ex(prop_info->ce, Z_OBJ_P(val), prop_info->name, /* silent */ true, &tmp);
 					if (EG(exception)) {
 						SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-						zend_release_properties(prop_ht);
+						zend_release_properties(myht);
 						return FAILURE;
 					}
 					data = &tmp;
@@ -408,7 +405,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 				if (simdjson_escape_string(buf, key,
 							encoder) == FAILURE) {
 					SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-					zend_release_properties(prop_ht);
+					zend_release_properties(myht);
 					return FAILURE;
 				}
 			} else {
@@ -429,7 +426,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 			if (simdjson_encode_zval(buf, data, options, encoder) == FAILURE) {
 				SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-				zend_release_properties(prop_ht);
+				zend_release_properties(myht);
 				zval_ptr_dtor(&tmp);
 				return FAILURE;
 			}
@@ -441,7 +438,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 	if (encoder->depth > encoder->max_depth) {
 		encoder->error_code = SIMDJSON_ERROR_DEPTH;
-		zend_release_properties(prop_ht);
+		zend_release_properties(myht);
 		return FAILURE;
 	}
 	--encoder->depth;
@@ -453,7 +450,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 	smart_str_appendc(buf, '}');
 
-	zend_release_properties(prop_ht);
+	zend_release_properties(myht);
 	return SUCCESS;
 }
 
