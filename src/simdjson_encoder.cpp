@@ -379,12 +379,13 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 					continue;
 				}
 
+#if PHP_VERSION_ID >= 80400
 				/* data is IS_PTR for properties with hooks. */
 				if (UNEXPECTED(Z_TYPE_P(data) == IS_PTR)) {
 					zend_property_info *prop_info = (zend_property_info*)Z_PTR_P(data);
-					/*if ((prop_info->flags & ZEND_ACC_VIRTUAL) && !prop_info->hooks[ZEND_PROPERTY_HOOK_GET]) {
+					if ((prop_info->flags & ZEND_ACC_VIRTUAL) && !prop_info->hooks[ZEND_PROPERTY_HOOK_GET]) {
 						continue;
-					}*/
+					}
 					zend_read_property_ex(prop_info->ce, Z_OBJ_P(val), prop_info->name, /* silent */ true, &tmp);
 					if (EG(exception)) {
 						SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
@@ -393,6 +394,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 					}
 					data = &tmp;
 				}
+#endif
 
 				if (need_comma) {
 					smart_str_appendc(buf, ',');
@@ -402,8 +404,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 				simdjson_pretty_print_nl_ident(buf, options, encoder);
 
-				if (simdjson_escape_string(buf, key,
-							encoder) == FAILURE) {
+				if (simdjson_escape_string(buf, key, encoder) == FAILURE) {
 					SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 					zend_release_properties(myht);
 					return FAILURE;
