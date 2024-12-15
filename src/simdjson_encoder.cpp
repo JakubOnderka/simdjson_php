@@ -33,6 +33,7 @@
 #include "countlut.h"
 #include "simdjson_vector8.h"
 #include "simdjson.h"
+#include "simdjson_compatibility.h"
 
 static zend_always_inline bool simdjson_check_stack_limit(void)
 {
@@ -45,7 +46,7 @@ static zend_always_inline bool simdjson_check_stack_limit(void)
 
 static inline void simdjson_pretty_print_colon(smart_str *buf, int options)
 {
-	ZEND_ASSERT(buf->s != NULL);
+	ZEND_ASSERT(buf->s);
 
 	if (options & SIMDJSON_PRETTY_PRINT) {
 		smart_str_appendl(buf, ": ", 2);
@@ -59,7 +60,7 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
   	char *next;
 	const char *whitespace = "\n                                ";
 
-	ZEND_ASSERT(buf->s != NULL);
+	ZEND_ASSERT(buf->s);
 
 	if (options & SIMDJSON_PRETTY_PRINT) {
 		next = smart_str_extend(buf, 4 * encoder->depth + 1);
@@ -79,16 +80,17 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
 static inline void simdjson_append_double(smart_str *buf, double d)
 {
 	size_t len;
-	char num[ZEND_DOUBLE_MAX_LENGTH];
+	char num[PHP_DOUBLE_MAX_LENGTH];
 
-	zend_gcvt(d, (int)PG(serialize_precision), '.', 'e', num);
+	ZEND_ASSERT(buf->s);
+	php_gcvt(d, (int)PG(serialize_precision), '.', 'e', num);
 	len = strlen(num);
 	smart_str_appendl(buf, num, len);
 }
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number)
 {
-	ZEND_ASSERT(buf->s != NULL);
+	ZEND_ASSERT(buf->s);
 
 	smart_str_alloc(buf, sizeof("-9223372036854775807") - 1, 0);
 	unsigned chars = simdjson_i64toa_countlut(number, ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s));
@@ -122,9 +124,10 @@ static zend_always_inline void simdjson_smart_str_appendl_unsafe(smart_str *dest
 static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table, int options, simdjson_encoder *encoder)
 {
   	zval* data;
-
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
+
     ZEND_ASSERT(recursion_rc != NULL);
+	ZEND_ASSERT(buf->s);
 
 	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
@@ -167,9 +170,10 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	zend_string *key;
 	zval *data;
 	zend_ulong index;
-
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
-	ZEND_ASSERT(recursion_rc != NULL);
+
+    ZEND_ASSERT(recursion_rc != NULL);
+	ZEND_ASSERT(buf->s);
 
 	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
@@ -461,44 +465,48 @@ static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf
 	switch (c) {
 		case '"':
 			simdjson_smart_str_appendl_unsafe(buf, "\\\"", 2);
-		break;
+			break;
 
 		case '\\':
 			simdjson_smart_str_appendl_unsafe(buf, "\\\\", 2);
-		break;
+			break;
 
 		case '\b':
 			simdjson_smart_str_appendl_unsafe(buf, "\\b", 2);
-		break;
+			break;
 
 		case '\f':
 			simdjson_smart_str_appendl_unsafe(buf, "\\f", 2);
-		break;
+			break;
 
 		case '\n':
 			simdjson_smart_str_appendl_unsafe(buf, "\\n", 2);
-		break;
+			break;
 
 		case '\r':
 			simdjson_smart_str_appendl_unsafe(buf, "\\r", 2);
-		break;
+			break;
 
 		case '\t':
 			simdjson_smart_str_appendl_unsafe(buf, "\\t", 2);
-		break;
+			break;
 
 		default:
 			simdjson_smart_str_appendl_unsafe(buf, control_chars[c], 6);
-		break;
+			break;
 	}
 }
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
-static void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
 	size_t copypos = 0;
 	size_t i = 0;
 	simdjson_vector8 chunk;
+
+    // vlen = len - (len % sizeof(simdjson_vector8))
 	size_t vlen = len & (int) (~(sizeof(simdjson_vector8) - 1));
+
+	ZEND_ASSERT(buf->s);
 
 	smart_str_alloc(buf, len + 2, 0);
 	simdjson_smart_str_appendc_unsafe(buf, '"');
@@ -507,9 +515,9 @@ static void simdjson_escape_long_string(smart_str *buf, const char *s, size_t le
         // Check chunk if contains char that needs to be escaped
 		for (; i < vlen; i += sizeof(simdjson_vector8)) {
 			simdjson_vector8_load(&chunk, (const uint8_t *) &s[i]);
-			if (simdjson_vector8_has_le(chunk, (unsigned char) 0x1F) ||
+			if (UNEXPECTED(simdjson_vector8_has_le(chunk, (unsigned char) 0x1F) ||
 				simdjson_vector8_has(chunk, (unsigned char) '"') ||
-				simdjson_vector8_has(chunk, (unsigned char) '\\')) {
+				simdjson_vector8_has(chunk, (unsigned char) '\\'))) {
 				break;
             }
 		}
@@ -523,7 +531,7 @@ static void simdjson_escape_long_string(smart_str *buf, const char *s, size_t le
 		smart_str_alloc(buf, sizeof(simdjson_vector8) * 6 + 1, 0);
 
 		for (int b = 0; b < sizeof(simdjson_vector8); b++) {
-			if (i == len) {
+			if (UNEXPECTED(i == len)) {
 				simdjson_smart_str_appendc_unsafe(buf, '"');
                 return;
 			}
@@ -546,7 +554,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 	size_t pos, len = ZSTR_LEN(str);
     const char *s = ZSTR_VAL(str);
 
-	ZEND_ASSERT(buf->s != NULL);
+	ZEND_ASSERT(buf->s);
 
 	if (len == 0) {
 		smart_str_appendl(buf, "\"\"", 2);
@@ -560,7 +568,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     }
 
     // Mark string as valid UTF-8
-	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+	//GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
     if (len >= sizeof(simdjson_vector8)) {
@@ -569,7 +577,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     }
 #endif
 
-    // For short string allocate maximum string length, so we can use
+    // For short strings allocate maximum possible string length, so we can use
     // unsafe methods for string copying
     smart_str_alloc(buf, len * 6 + 2, 0);
     simdjson_smart_str_appendc_unsafe(buf, '"');
@@ -599,11 +607,12 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, int options, simdjson_encoder *encoder) /* {{{ */
 {
 	zend_class_entry *ce = Z_OBJCE_P(val);
-	zend_object *obj = Z_OBJ_P(val);
-	uint32_t *guard = zend_get_recursion_guard(obj);
 	zval retval, fname;
 	zend_result return_code;
 
+#if PHP_VERSION_ID >= 80300
+	zend_object *obj = Z_OBJ_P(val);
+	uint32_t *guard = zend_get_recursion_guard(obj);
 	ZEND_ASSERT(guard != NULL);
 
 	if (ZEND_GUARD_IS_RECURSIVE(guard, JSON)) {
@@ -612,6 +621,16 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	}
 
 	ZEND_GUARD_PROTECT_RECURSION(guard, JSON);
+#else
+	HashTable* myht = Z_OBJPROP_P(val);
+
+	if (myht && GC_IS_RECURSIVE(myht)) {
+		encoder->error_code = SIMDJSON_ERROR_RECURSION;
+		return FAILURE;
+	}
+
+	SIMDJSON_HASH_PROTECT_RECURSION(myht);
+#endif
 
 	ZVAL_STRING(&fname, "jsonSerialize");
 
@@ -620,8 +639,11 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 			zend_throw_exception_ex(NULL, 0, "Failed calling %s::jsonSerialize()", ZSTR_VAL(ce->name));
 		}
 		zval_ptr_dtor(&fname);
-
+#if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
+#else
+		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
+#endif
 		return FAILURE;
 	}
 
@@ -629,19 +651,31 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 		/* Error already raised */
 		zval_ptr_dtor(&retval);
 		zval_ptr_dtor(&fname);
+#if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
+#else
+		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
+#endif
 		return FAILURE;
 	}
 
 	if ((Z_TYPE(retval) == IS_OBJECT) &&
 		(Z_OBJ(retval) == Z_OBJ_P(val))) {
 		/* Handle the case where jsonSerialize does: return $this; by going straight to encode array */
+#if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
+#else
+		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
+#endif
 		return_code = simdjson_encode_array(buf, &retval, options, encoder);
 	} else {
 		/* All other types, encode as normal */
 		return_code = simdjson_encode_zval(buf, &retval, options, encoder);
+#if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
+#else
+		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
+#endif
 	}
 
 	zval_ptr_dtor(&retval);
@@ -650,6 +684,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	return return_code;
 }
 
+#if PHP_VERSION_ID >= 80100
 // Copy of zend_enum_fetch_case_value
 static zend_always_inline zval *simdjson_zend_enum_fetch_case_value(zend_object *zobj)
 {
@@ -669,10 +704,11 @@ static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, 
 	zval *value_zv = simdjson_zend_enum_fetch_case_value(Z_OBJ_P(val));
 	return simdjson_encode_zval(buf, value_zv, options, encoder);
 }
+#endif
 
 zend_result simdjson_encode_zval(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
 {
-	ZEND_ASSERT(buf->s != NULL);
+	ZEND_ASSERT(buf->s);
 again:
 	switch (Z_TYPE_P(val))
 	{
@@ -707,9 +743,11 @@ again:
 			if (instanceof_function(Z_OBJCE_P(val), php_json_serializable_ce)) {
 				return simdjson_encode_serializable_object(buf, val, options, encoder);
 			}
+#if PHP_VERSION_ID >= 80100
 			if (Z_OBJCE_P(val)->ce_flags & ZEND_ACC_ENUM) {
 				return simdjson_encode_serializable_enum(buf, val, options, encoder);
 			}
+#endif
 			/* fallthrough -- Non-serializable object */
 			ZEND_FALLTHROUGH;
 		case IS_ARRAY: {
@@ -732,7 +770,7 @@ again:
 			return FAILURE;
 	}
 
-    // For simdjson_encode_to_stream write data to stream if buffer is larger than 4096 bytes
+    // For simdjson_encode_to_stream method, write data to stream if buffer is larger than 4096 bytes
     if (UNEXPECTED(encoder->stream != NULL && ZSTR_LEN(buf->s) >= 4 * 1024)) {
     	if (simdjson_encode_write_stream(buf, encoder) == FAILURE) {
           	return FAILURE;

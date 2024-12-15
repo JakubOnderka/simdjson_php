@@ -33,12 +33,13 @@ if test "$PHP_SIMDJSON" != "no"; then
   dnl Disable development checks of C simdjson library in php debug builds (can manually override)
   PHP_NEW_EXTENSION(simdjson, [
       php_simdjson.cpp                    \
-      src/simdjson_bindings.cpp           \
+      src/simdjson_decoder.cpp            \
+      src/countlut.cpp                    \
       src/simdjson_encoder.cpp            \
       src/simdjson.cpp],
     $ext_shared,, "-std=c++17 -DZEND_ENABLE_STATIC_TSRMLS_CACHE=1 -DSIMDJSON_EXCEPTIONS=0 -DSIMDJSON_DEVELOPMENT_CHECKS=0", cxx)
 
-  PHP_INSTALL_HEADERS([ext/simdjson], [php_simdjson.h src/simdjson_bindings_defs.h])
+  PHP_INSTALL_HEADERS([ext/simdjson], [php_simdjson.h src/simdjson_decoder_defs.h])
   PHP_ADD_MAKEFILE_FRAGMENT
   PHP_ADD_BUILD_DIR(src, 1)
 fi

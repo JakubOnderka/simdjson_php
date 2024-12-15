@@ -61,6 +61,8 @@ function simdjson_key_exists(string $json, string $key, int $depth = 512): bool 
 
 function simdjson_cleanup(): true {}
 
+function simdjson_is_valid_utf8(string $string): bool {}
+
 function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string|false {}
 
 function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, int $depth = 512) : bool {}

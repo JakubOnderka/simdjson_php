@@ -1,6 +1,6 @@
 #include "countlut.h"
 
-inline unsigned CountDecimalDigit64(uint64_t n) {
+static inline unsigned CountDecimalDigit64(uint64_t n) {
 #if defined(_MSC_VER) || defined(__GNUC__)
     static const uint64_t powers_of_10[] = {
         0,

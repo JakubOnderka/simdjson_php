@@ -35,18 +35,13 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 } /* end extern "C" */
 
 /* C++ header file for simdjson_php helper methods/classes */
-#include "src/simdjson_bindings_defs.h"
+#include "src/simdjson_decoder_defs.h"
 #include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
 #include "src/simdjson.h"
 
 
 #include "simdjson_arginfo.h"
-
-/* Define RETURN_THROWS macro in older php versions */
-#ifndef RETURN_THROWS
-#define RETURN_THROWS() do { ZEND_ASSERT(EG(exception)); (void) return_value; return; } while (0)
-#endif
 
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
@@ -95,7 +90,7 @@ static void simdjson_parser_cleanup() {
     }
 }
 
-PHP_FUNCTION (simdjson_is_valid) {
+PHP_FUNCTION(simdjson_is_valid) {
     zend_string *json = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
 
@@ -113,7 +108,7 @@ PHP_FUNCTION (simdjson_is_valid) {
     ZVAL_BOOL(return_value, !error);
 }
 
-PHP_FUNCTION (simdjson_decode) {
+PHP_FUNCTION(simdjson_decode) {
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
     zend_string *json = NULL;
@@ -136,7 +131,7 @@ PHP_FUNCTION (simdjson_decode) {
     }
 }
 
-PHP_FUNCTION (simdjson_key_value) {
+PHP_FUNCTION(simdjson_key_value) {
     zend_string *json = NULL;
     zend_string *key = NULL;
     zend_bool associative = 0;
@@ -155,7 +150,7 @@ PHP_FUNCTION (simdjson_key_value) {
     }
 }
 
-PHP_FUNCTION (simdjson_key_count) {
+PHP_FUNCTION(simdjson_key_count) {
     zend_string *json = NULL;
     zend_string *key = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
@@ -177,7 +172,7 @@ PHP_FUNCTION (simdjson_key_count) {
     }
 }
 
-PHP_FUNCTION (simdjson_key_exists) {
+PHP_FUNCTION(simdjson_key_exists) {
     zend_string *json = NULL;
     zend_string *key = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
@@ -202,7 +197,7 @@ PHP_FUNCTION (simdjson_key_exists) {
     }
 }
 
-PHP_FUNCTION (simdjson_cleanup) {
+PHP_FUNCTION(simdjson_cleanup) {
     if (zend_parse_parameters_none() == FAILURE) {
         RETURN_THROWS();
     }
@@ -213,6 +208,30 @@ PHP_FUNCTION (simdjson_cleanup) {
         SIMDJSON_G(parser) = NULL;
     }
     RETURN_TRUE;
+}
+
+PHP_FUNCTION(simdjson_is_valid_utf8) {
+    zend_string *string = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_STR(string)
+    ZEND_PARSE_PARAMETERS_END();
+
+#ifdef IS_STR_VALID_UTF8
+    // If string was already successfully validated, just return true
+    if (ZSTR_IS_VALID_UTF8(string)) {
+        RETURN_TRUE;
+    }
+#endif
+
+    bool is_ok = simdjson::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
+#ifdef IS_STR_VALID_UTF8
+    if (EXPECTED(is_ok)) {
+        // String is UTF-8 valid, so we can also set proper flag
+        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+    }
+#endif
+    RETURN_BOOL(is_ok);
 }
 
 static const char *php_json_get_error_msg(simdjson_error_code error_code)

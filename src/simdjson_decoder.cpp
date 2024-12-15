@@ -20,22 +20,14 @@ extern "C" {
 }
 
 #include "simdjson.h"
-#include "simdjson_bindings_defs.h"
-
-#if PHP_VERSION_ID < 70300
-#define zend_string_release_ex(s, persistent) zend_string_release((s))
-#endif
-
-#ifndef ZVAL_EMPTY_ARRAY
-#define ZVAL_EMPTY_ARRAY(value) array_init(value)
-#endif
+#include "simdjson_decoder_defs.h"
+#include "simdjson_compatibility.h"
 
 #define SIMDJSON_PHP_TRY(EXPR) { auto _err = (EXPR); if (UNEXPECTED(_err)) { return _err; } }
 
 #define SIMDJSON_DEPTH_CHECK_THRESHOLD 100000
 
-PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code error)
-{
+PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code error) {
     switch (error) {
         case SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE:
             return "JSON pointer refers to a value that cannot be counted";
@@ -46,14 +38,12 @@ PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code erro
     }
 }
 
-PHP_SIMDJSON_API void php_simdjson_throw_jsonexception(simdjson_php_error_code error)
-{
+PHP_SIMDJSON_API void php_simdjson_throw_jsonexception(simdjson_php_error_code error) {
     zend_throw_exception(simdjson_exception_ce, php_simdjson_error_msg(error), (zend_long) error);
 }
 
 static inline simdjson::simdjson_result<simdjson::dom::element>
-get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_pointer)
-{
+get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_pointer) {
     /* https://www.rfc-editor.org/rfc/rfc6901.html */
     /* TODO: Deprecate in a subsequent minor release and remove in a major release to comply with the standard. */
     auto std_pointer = ((!json_pointer.empty() && json_pointer[0] != '/') ? "/" : "") + std::string(json_pointer.begin(), json_pointer.end());
@@ -69,6 +59,15 @@ static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint3
     zend_hash_real_init_packed(arr);
 #endif
     return arr;
+}
+
+/** Decoded string from JSON must be always UTF-8 valid, so we can provide proper flag to zend_string */
+static zend_always_inline zend_string* simdjson_string_init(const char* buf, const size_t len) {
+    zend_string *str = zend_string_init(buf, len, 0);
+#ifdef IS_STR_VALID_UTF8
+    GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+#endif
+    return str;
 }
 
 static simdjson::error_code
@@ -184,7 +183,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
         idx = ht->nNumUsed++;
         ht->nNumOfElements++;
         p = ht->arData + idx;
-        p->key = zend_string_init(str, len, 0); // initialize new string for key
+        p->key = simdjson_string_init(str, len); // initialize new string for key
         p->h = ZSTR_H(p->key) = h;
         HT_FLAGS(ht) &= ~HASH_FLAG_STATIC_KEYS;
         ZVAL_COPY_VALUE(&p->val, pData);
@@ -229,7 +228,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         return;
     }
 #endif
-    zend_string *key = zend_string_init(buf, len, 0);
+    zend_string *key = simdjson_string_init(buf, len);
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
@@ -393,7 +392,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 if (size <= 1) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
-                    key = zend_string_init(data, size, 0);
+                    key = simdjson_string_init(data, size);
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
