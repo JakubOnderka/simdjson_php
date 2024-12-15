@@ -108,6 +108,34 @@ PHP_FUNCTION(simdjson_is_valid) {
     ZVAL_BOOL(return_value, !error);
 }
 
+// Decode simple and common JSON values without allocating and using simdjson parser
+static zend_always_inline bool simdjson_simple_decode(zend_string *json, zval *return_value, bool associative) {
+    // Empty object
+    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+        if (associative) {
+            RETVAL_EMPTY_ARRAY();
+        } else {
+            object_init(return_value);
+        }
+        return true;
+    }
+
+    // Empty array
+    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
+        RETVAL_EMPTY_ARRAY();
+        return true;
+    }
+
+    if (zend_string_equals_cstr(json, "true", 4)) {
+        RETVAL_TRUE;
+        return true;
+    } else if (zend_string_equals_cstr(json, "false", 5)) {
+        RETVAL_FALSE;
+        return true;
+    }
+    return false;
+}
+
 PHP_FUNCTION(simdjson_decode) {
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
@@ -123,9 +151,14 @@ PHP_FUNCTION(simdjson_decode) {
     if (!simdjson_validate_depth(depth, "simdjson_decode", 2)) {
         RETURN_THROWS();
     }
+
+    if (simdjson_simple_decode(json, return_value, associative)) {
+        return;
+    }
+
     simdjson_php_error_code error = php_simdjson_parse(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), return_value, associative, depth);
     simdjson_parser_cleanup();
-    if (error) {
+    if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);
         RETURN_THROWS();
     }
