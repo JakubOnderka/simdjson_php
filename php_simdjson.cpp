@@ -317,6 +317,7 @@ PHP_FUNCTION(simdjson_encode)
     ZEND_PARSE_PARAMETERS_END();
 
     encoder.max_depth = (int)depth;
+    // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
     simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
 

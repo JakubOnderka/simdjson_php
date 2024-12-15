@@ -460,41 +460,9 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 }
 
 static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf, char c) {
-	char *dst;
-
-	switch (c) {
-		case '"':
-			simdjson_smart_str_appendl_unsafe(buf, "\\\"", 2);
-			break;
-
-		case '\\':
-			simdjson_smart_str_appendl_unsafe(buf, "\\\\", 2);
-			break;
-
-		case '\b':
-			simdjson_smart_str_appendl_unsafe(buf, "\\b", 2);
-			break;
-
-		case '\f':
-			simdjson_smart_str_appendl_unsafe(buf, "\\f", 2);
-			break;
-
-		case '\n':
-			simdjson_smart_str_appendl_unsafe(buf, "\\n", 2);
-			break;
-
-		case '\r':
-			simdjson_smart_str_appendl_unsafe(buf, "\\r", 2);
-			break;
-
-		case '\t':
-			simdjson_smart_str_appendl_unsafe(buf, "\\t", 2);
-			break;
-
-		default:
-			simdjson_smart_str_appendl_unsafe(buf, control_chars[c], 6);
-			break;
-	}
+	auto append = simdjson_escape[c];
+	memcpy(ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s), append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
+	ZSTR_LEN(buf->s) += append.len;
 }
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
@@ -528,7 +496,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 		}
 
         // Ensure that buf contains enoug space that we can call unsafe methods
-		smart_str_alloc(buf, sizeof(simdjson_vector8) * 6 + 1, 0);
+		smart_str_alloc(buf, sizeof(simdjson_vector8) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1, 0);
 
 		for (int b = 0; b < sizeof(simdjson_vector8); b++) {
 			if (UNEXPECTED(i == len)) {
@@ -536,7 +504,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
                 return;
 			}
 			char c = s[i++];
-			if (EXPECTED(need_escaping[c] == 0)) {
+			if (EXPECTED(simdjson_need_escaping[c] == 0)) {
 				simdjson_smart_str_appendc_unsafe(buf, c);
 			} else {
 				simdjson_append_escape_char_unsafe(buf, c);
@@ -579,13 +547,13 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 
     // For short strings allocate maximum possible string length, so we can use
     // unsafe methods for string copying
-    smart_str_alloc(buf, len * 6 + 2, 0);
+    smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2, 0);
     simdjson_smart_str_appendc_unsafe(buf, '"');
 
     size_t start = 0;
     for (pos = 0; pos < len; ++pos) {
     	char c = s[pos];
-    	if (EXPECTED(need_escaping[c] == 0)) {
+    	if (EXPECTED(simdjson_need_escaping[c] == 0)) {
     		continue;
     	}
 
