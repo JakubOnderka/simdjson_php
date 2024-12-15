@@ -568,7 +568,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     }
 
     // Mark string as valid UTF-8
-	//GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
     if (len >= sizeof(simdjson_vector8)) {
