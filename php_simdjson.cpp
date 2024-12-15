@@ -90,7 +90,7 @@ static void simdjson_parser_cleanup() {
     }
 }
 
-PHP_FUNCTION(simdjson_is_valid) {
+PHP_FUNCTION(simdjson_validate) {
     zend_string *json = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
 
@@ -391,11 +391,8 @@ ZEND_TSRMLS_CACHE_UPDATE();
 #define SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(errcode, val) REGISTER_LONG_CONSTANT("SIMDJSON_ERR_" #errcode, (val), CONST_PERSISTENT | CONST_CS)
 PHP_MINIT_FUNCTION (simdjson) {
 	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
-#if PHP_VERSION_ID >= 80000
 	simdjson_value_error_ce = register_class_SimdJsonValueError(zend_ce_value_error);
-#else
-	simdjson_value_error_ce = register_class_SimdJsonValueError(zend_ce_error);
-#endif
+
     SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(CAPACITY);                   ///< This parser can't support a document that big
     // SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(MEMALLOC);                   ///< Error allocating memory, most likely out of memory
     SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(TAPE_ERROR);                 ///< Something went wrong, this is a generic error

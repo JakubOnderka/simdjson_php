@@ -49,7 +49,10 @@ const SIMDJSON_ERROR_INVALID_PROPERTY_NAME = UNKNOWN;
  */
 const SIMDJSON_ERROR_NON_BACKED_ENUM = UNKNOWN;
 
-function simdjson_is_valid(string $json,int $depth = 512): bool {}
+function simdjson_validate(string $json, int $depth = 512): bool {}
+
+/** @alias simdjson_validate */
+function simdjson_is_valid(string $json, int $depth = 512): bool {}
 
 function simdjson_decode(string $json, bool $associative = false, int $depth = 512): mixed {}
 
