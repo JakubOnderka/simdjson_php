@@ -6,7 +6,7 @@ simdjson_php bindings for the [simdjson project](https://github.com/lemire/simdj
 
 ## Requirement
 
-- PHP 7.0+ (The latest php version was 8.2 at the time of writing)
+- PHP 8.0+ (The latest PHP version was 8.4 at the time of writing)
 - Prerequisites: g++ (version 7 or better) or clang++ (version 6 or better), and a 64-bit system with a command-line shell (e.g., Linux, macOS, freeBSD). We also support programming environments like Visual Studio and Xcode, but different steps are needed
 
 ## Installing

@@ -67,68 +67,11 @@ jobs:
       - name: "Show"
         run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
 
-  PHP74-alpine:
-    name: PHP 7.4 Alpine 3.12
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-
-      - name: "Build extension"
-        run: "docker build -t simdjsontest -f docker_php7.4-alpine ."
-
-      - name: "Show"
-        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
-
-  PHP73-alpine:
-    name: PHP 7.3 Alpine 3.12
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-
-      - name: "Build extension"
-        run: "docker build -t simdjsontest -f docker_php7.3-alpine ."
-
-      - name: "Show"
-        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
-
-  PHP72-alpine:
-    name: PHP 7.2 Alpine 3.12
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-
-      - name: "Build extension"
-        run: "docker build -t simdjsontest -f docker_php7.2-alpine ."
-
-      - name: "Show"
-        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
-
-  PHP71-alpine:
-    name: PHP 7.1 Alpine 3.10
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout"
-        uses: actions/checkout@v4
-
-      - name: "Build extension"
-        run: "docker build -t simdjsontest -f docker_php7.1-alpine ."
-
-      - name: "Show"
-        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
-
   Ubuntu:
     strategy:
       fail-fast: false
       matrix:
         php-version:
-          - "7.0"
-          - "7.1"
-          - "7.2"
-          - "7.3"
-          - "7.4"
           - "8.0"
           - "8.1"
           - "8.2"

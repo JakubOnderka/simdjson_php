@@ -35,11 +35,11 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 } /* end extern "C" */
 
 /* C++ header file for simdjson_php helper methods/classes */
+#include "src/simdjson_compatibility.h"
 #include "src/simdjson_decoder_defs.h"
 #include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
 #include "src/simdjson.h"
-
 
 #include "simdjson_arginfo.h"
 

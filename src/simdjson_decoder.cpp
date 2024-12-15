@@ -8,6 +8,7 @@
   | http://www.apache.org/licenses/LICENSE-2.0.html                      |
   +----------------------------------------------------------------------+
   | Author: Jinxi Wang  <1054636713@qq.com>                              |
+  | Author: Jakub Onderka <jakub.onderka@qmail.com>                      |
   +----------------------------------------------------------------------+
 */
 
@@ -55,18 +56,14 @@ static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint3
     zend_array *arr;
     array_init_size(zv, size);
     arr = Z_ARR_P(zv);
-#if PHP_VERSION_ID >= 70300
     zend_hash_real_init_packed(arr);
-#endif
     return arr;
 }
 
 /** Decoded string from JSON must be always UTF-8 valid, so we can provide proper flag to zend_string */
 static zend_always_inline zend_string* simdjson_string_init(const char* buf, const size_t len) {
     zend_string *str = zend_string_init(buf, len, 0);
-#ifdef IS_STR_VALID_UTF8
     GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
-#endif
     return str;
 }
 
@@ -100,8 +97,6 @@ build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc,
 }
 
 static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *buf, size_t len) {
-    /* In php 7.1, the ZSTR_CHAR macro doesn't exist, and CG(one_char_string)[chr] may or may not be null */
-#if PHP_VERSION_ID >= 70200
     if (len <= 1) {
         /*
         A note on performance benefits of the use of interned strings here and elsewhere:
@@ -119,7 +114,6 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
         ZVAL_INTERNED_STR(v, key);
         return;
     }
-#endif
     ZVAL_STRINGL(v, buf, len);
 }
 
@@ -218,7 +212,6 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         simdjson_zend_hash_str_add_or_update(ht, buf, len, value);
     }
 #else
-#if PHP_VERSION_ID >= 70200
     if (len <= 1) {
         /* Look up the interned string (i.e. not reference counted) */
         zend_string *key = len == 1 ? ZSTR_CHAR((unsigned char)buf[0]) : ZSTR_EMPTY_ALLOC();
@@ -227,7 +220,6 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         /* zend_string_release_ex is a no-op for interned strings */
         return;
     }
-#endif
     zend_string *key = simdjson_string_init(buf, len);
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
@@ -364,9 +356,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
         case simdjson::dom::element_type::OBJECT : {
             const auto json_object = element.get_object().value_unsafe();
             object_init(return_value);
-#if PHP_VERSION_ID >= 80000
             zend_object *obj = Z_OBJ_P(return_value);
-#endif
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
@@ -387,7 +377,6 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 }
 
                 /* Add the key to the object */
-#if PHP_VERSION_ID >= 80000
                 zend_string *key;
                 if (size <= 1) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
@@ -396,23 +385,7 @@ static simdjson_php_error_code create_object(simdjson::dom::element element, zva
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
-#else
 
-# if PHP_VERSION_ID >= 70200
-                if (size <= 1) {
-                    zval zkey;
-                    zend_string *key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
-                    ZVAL_INTERNED_STR(&zkey, key);
-                    zend_std_write_property(return_value, &zkey, &value, NULL);
-                } else
-# endif
-                {
-                    zval zkey;
-                    ZVAL_STRINGL(&zkey, data, size);
-                    zend_std_write_property(return_value, &zkey, &value, NULL);
-                    zval_ptr_dtor_nogc(&zkey);
-                }
-#endif
                 /* After the key is added to the object (incrementing the reference count) ,
                  * decrement the reference count of the value by one */
                 zval_ptr_dtor_nogc(&value);

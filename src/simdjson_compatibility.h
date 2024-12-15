@@ -1,6 +1,8 @@
 #ifndef SIMDJSON_COMPATIBILITY_H
 #define SIMDJSON_COMPATIBILITY_H
 
+/** Keep compatibility with older PHP version that do not support some macros */
+
 #include "php.h"
 
 // ZSTR_IS_VALID_UTF8 is available since PHP 8.3
@@ -11,19 +13,6 @@
 // ZEND_HASH_PACKED_FOREACH_VAL is available since PHP 8.2
 #ifndef ZEND_HASH_PACKED_FOREACH_VAL
 #define	ZEND_HASH_PACKED_FOREACH_VAL(table, data) ZEND_HASH_FOREACH_VAL(table, data)
-#endif
-
-#if PHP_VERSION_ID < 70300
-#define zend_string_release_ex(s, persistent) zend_string_release((s))
-#endif
-
-#ifndef ZVAL_EMPTY_ARRAY
-#define ZVAL_EMPTY_ARRAY(value) array_init(value)
-#endif
-
-/* Define RETURN_THROWS macro in older php versions */
-#ifndef RETURN_THROWS
-#define RETURN_THROWS() do { ZEND_ASSERT(EG(exception)); (void) return_value; return; } while (0)
 #endif
 
 #ifndef ZEND_FALLTHROUGH
