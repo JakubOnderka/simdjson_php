@@ -30,7 +30,6 @@ extern "C" {
  * Both the declaration and the definition of PHP_SIMDJSON_API variables, functions must be within an 'extern "C"' block for Windows
  */
 PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
-PHP_SIMDJSON_API zend_class_entry *simdjson_value_error_ce;
 
 } /* end extern "C" */
 
@@ -63,19 +62,12 @@ PHP_SIMDJSON_API struct simdjson_php_parser *php_simdjson_get_default_singleton_
 // The simdjson parser accepts strings with at most 32-bit lengths, for now.
 #define SIMDJSON_MAX_DEPTH ((zend_long)((SIZE_MAX / 8) < (UINT32_MAX / 2) ? (SIZE_MAX / 8) : (UINT32_MAX / 2)))
 
-static ZEND_COLD void simdjson_throw_depth_must_be_positive(const char *function_name, const int arg_num) {
-    zend_throw_error(simdjson_value_error_ce, "%s(): Argument #%d ($depth) must be greater than zero", function_name, arg_num);
-}
-static ZEND_COLD void simdjson_throw_depth_too_large(const char *function_name, const int arg_num) {
-    zend_throw_error(simdjson_value_error_ce, "%s(): Argument #%d ($depth) exceeds maximum allowed value of " ZEND_LONG_FMT, function_name, arg_num, SIMDJSON_MAX_DEPTH);
-}
-
-static zend_always_inline bool simdjson_validate_depth(zend_long depth, const char *function_name, const int arg_num) {
+static zend_always_inline bool simdjson_validate_depth(zend_long depth, const int arg_num) {
     if (UNEXPECTED(depth <= 0)) {
-        simdjson_throw_depth_must_be_positive(function_name, arg_num);
+        zend_argument_value_error(arg_num, "must be greater than zero");
         return false;
     } else if (UNEXPECTED(depth > SIMDJSON_MAX_DEPTH)) {
-        simdjson_throw_depth_too_large(function_name, arg_num);
+        zend_argument_value_error(arg_num, "exceeds maximum allowed value of " ZEND_LONG_FMT, SIMDJSON_MAX_DEPTH);
         return false;
     }
     return true;
@@ -100,7 +92,7 @@ PHP_FUNCTION(simdjson_validate) {
         Z_PARAM_LONG(depth)
     ZEND_PARSE_PARAMETERS_END();
 
-    if (!simdjson_validate_depth(depth, "simdjson_is_valid", 2)) {
+    if (!simdjson_validate_depth(depth, 2)) {
         RETURN_THROWS();
     }
     simdjson_php_error_code error = php_simdjson_validate(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), depth);
@@ -148,7 +140,7 @@ PHP_FUNCTION(simdjson_decode) {
         Z_PARAM_LONG(depth)
     ZEND_PARSE_PARAMETERS_END();
 
-    if (!simdjson_validate_depth(depth, "simdjson_decode", 2)) {
+    if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
 
@@ -172,7 +164,7 @@ PHP_FUNCTION(simdjson_key_value) {
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|bl", &json, &key, &associative, &depth) == FAILURE) {
         RETURN_THROWS();
     }
-    if (!simdjson_validate_depth(depth, "simdjson_key_value", 4)) {
+    if (!simdjson_validate_depth(depth, 4)) {
         RETURN_THROWS();
     }
     simdjson_php_error_code error = php_simdjson_key_value(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_VAL(key), return_value, associative, depth);
@@ -191,7 +183,7 @@ PHP_FUNCTION(simdjson_key_count) {
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|lb", &json, &key, &depth, &throw_if_uncountable) == FAILURE) {
         RETURN_THROWS();
     }
-    if (!simdjson_validate_depth(depth, "simdjson_key_count", 4)) {
+    if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
     simdjson_php_error_code error = php_simdjson_key_count(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_VAL(key), return_value, depth, throw_if_uncountable);
@@ -212,7 +204,7 @@ PHP_FUNCTION(simdjson_key_exists) {
     if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|l", &json, &key, &depth) == FAILURE) {
         RETURN_THROWS();
     }
-    if (!simdjson_validate_depth(depth, "simdjson_key_exists", 3)) {
+    if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
     simdjson_php_error_code error = php_simdjson_key_exists(simdjson_get_parser(), ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_VAL(key), depth);
@@ -401,7 +393,6 @@ ZEND_TSRMLS_CACHE_UPDATE();
 #define SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(errcode, val) REGISTER_LONG_CONSTANT("SIMDJSON_ERR_" #errcode, (val), CONST_PERSISTENT | CONST_CS)
 PHP_MINIT_FUNCTION (simdjson) {
 	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
-	simdjson_value_error_ce = register_class_SimdJsonValueError(zend_ce_value_error);
 
     SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(CAPACITY);                   ///< This parser can't support a document that big
     // SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(MEMALLOC);                   ///< Error allocating memory, most likely out of memory

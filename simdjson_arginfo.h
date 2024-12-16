@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 3443828b0fb415a8b967809f4b7fefe46133f833 */
+ * Stub hash: 5a636f8af9ded782b05af4b19b4f636ebf9c201f */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -85,11 +85,6 @@ static const zend_function_entry class_SimdJsonException_methods[] = {
 	ZEND_FE_END
 };
 
-
-static const zend_function_entry class_SimdJsonValueError_methods[] = {
-	ZEND_FE_END
-};
-
 static void register_simdjson_symbols(int module_number)
 {
 	REGISTER_LONG_CONSTANT("SIMDJSON_PRETTY_PRINT", SIMDJSON_PRETTY_PRINT, CONST_PERSISTENT);
@@ -110,16 +105,6 @@ static zend_class_entry *register_class_SimdJsonException(zend_class_entry *clas
 
 	INIT_CLASS_ENTRY(ce, "SimdJsonException", class_SimdJsonException_methods);
 	class_entry = zend_register_internal_class_ex(&ce, class_entry_RuntimeException);
-
-	return class_entry;
-}
-
-static zend_class_entry *register_class_SimdJsonValueError(zend_class_entry *class_entry_ValueError)
-{
-	zend_class_entry ce, *class_entry;
-
-	INIT_CLASS_ENTRY(ce, "SimdJsonValueError", class_SimdJsonValueError_methods);
-	class_entry = zend_register_internal_class_ex(&ce, class_entry_ValueError);
 
 	return class_entry;
 }

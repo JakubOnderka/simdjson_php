@@ -18,7 +18,7 @@ dump(function () use ($long) { return simdjson_is_valid($long, 2999); });
 dump(function () use ($long) { return simdjson_is_valid($long, 3000); });
 ?>
 --EXPECTF--
-Caught SimdJsonValueError: simdjson_is_valid(): Argument #2 ($depth) must be greater than zero
+Caught ValueError: simdjson_is_valid(): Argument #2 ($depth) must be greater than zero
 bool(true)
 bool(true)
 bool(false)
