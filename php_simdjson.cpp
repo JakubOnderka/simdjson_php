@@ -327,6 +327,10 @@ PHP_FUNCTION(simdjson_encode)
         RETURN_THROWS();
     }
 
+    if (options & SIMDJSON_APPEND_NEWLINE) {
+        smart_str_appendc(&buf, '\n');
+    }
+
     RETURN_STR(smart_str_extract(&buf));
 }
 
@@ -361,6 +365,11 @@ PHP_FUNCTION(simdjson_encode_to_stream)
 
     smart_str_erealloc(&buf, 1024 * 8);
     simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
+
+    if (options & SIMDJSON_APPEND_NEWLINE) {
+        smart_str_appendc(&buf, '\n');
+    }
+
     simdjson_encode_write_stream(&buf, &encoder); // write rest
     efree(buf.s);
 

@@ -7,6 +7,11 @@
  * @cvalue SIMDJSON_PRETTY_PRINT
  */
 const SIMDJSON_PRETTY_PRINT = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_APPEND_NEWLINE
+ */
+const SIMDJSON_APPEND_NEWLINE = UNKNOWN;
 
 /**
  * @var int
