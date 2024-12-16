@@ -73,18 +73,20 @@ static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint3
 
 /** Check if it is necessary to reallocate string to buffer */
 static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) {
-    if (EXPECTED(!(GC_FLAGS(json) & IS_STR_PERSISTENT))) { // it is not possible to check allocated size for persistent string
-        size_t allocated = zend_mem_block_size((void*)json);
-        if (UNEXPECTED(allocated == 0)) {
-            return true;
-        }
-        size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(json));
-        size_t free_space = allocated - struct_size;
-        if (free_space >= simdjson::SIMDJSON_PADDING) {
-            return false;
-        }
+    // it is not possible to check allocated size for persistent or permanent string
+    bool is_persistent_or_permanent = GC_FLAGS(json) & (IS_STR_PERSISTENT | IS_STR_PERMANENT);
+    if (UNEXPECTED(is_persistent_or_permanent)) {
+        return true;
     }
-    return true;
+
+    size_t allocated = zend_mem_block_size((void*)json);
+    if (UNEXPECTED(allocated == 0)) {
+        return true;
+    }
+    size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(json));
+    size_t free_space = allocated - struct_size;
+
+    return free_space < simdjson::SIMDJSON_PADDING;
 }
 
 static simdjson::error_code
