@@ -192,39 +192,18 @@ function simdjson_key_value(string $json, string $key, bool $associative = false
  */
 class SimdJsonException extends RuntimeException {
 }
-
-/**
- * Thrown for error conditions on fields such as $depth that are not expected to be
- * from user-provided JSON, with similar behavior to php 8.0.
- *
- * NOTE: https://www.php.net/valueerror was added in php 8.0.
- * In older php versions, this extends Error instead.
- *
- * When support for php 8.0 is dropped completely,
- * a major release of simdjson will likely switch to a standard ValueError.
- */
-class SimdJsonValueError extends ValueError {
-}
 ```
 
-## Edge cases
+## Decoder edge cases
 
 There are some differences from `json_decode()` due to the implementation of the underlying simdjson library. This will throw a RuntimeException if simdjson rejects the JSON.
 
 Note that the simdjson PECL is using a fork of the simdjson C library to imitate php's handling of integers and floats in JSON.
 
-1) **Until simdjson 2.1.0,** `simdjson_decode()` differed in how out of range 64-bit integers and floats are handled.
-
-See https://github.com/simdjson/simdjson/blob/master/doc/basics.md#standard-compliance
-
-> - The specification allows implementations to set limits on the range and precision of numbers accepted.  We support 64-bit floating-point numbers as well as integer values.
->   - We parse integers and floating-point numbers as separate types which allows us to support all signed (two's complement) 64-bit integers, like a Java `long` or a C/C++ `long long` and all 64-bit unsigned integers. When we cannot represent exactly an integer as a signed or unsigned 64-bit value, we reject the JSON document.
->   - We support the full range of 64-bit floating-point numbers (binary64). The values range from `std::numeric_limits<double>::lowest()`  to `std::numeric_limits<double>::max()`, so from -1.7976e308 all the way to 1.7975e308. Extreme values (less or equal to -1e308, greater or equal to 1e308) are rejected: we refuse to parse the input document. Numbers are parsed with a perfect accuracy (ULP 0): the nearest floating-point value is chosen, rounding to even when needed. If you serialized your floating-point numbers with 17 significant digits in a standard compliant manner, the simdjson library is guaranteed to recover the same numbers, exactly.
-
-2) The maximum string length that can be passed to `simdjson_decode()` is 4GiB (4294967295 bytes).
+1) The maximum string length that can be passed to `simdjson_decode()` is 4GiB (4294967295 bytes).
 `json_decode()` can decode longer strings.
 
-3) The handling of max depth is counted slightly differently for empty vs non-empty objects/arrays.
+2) The handling of max depth is counted slightly differently for empty vs non-empty objects/arrays.
 In `json_decode`, an array with a scalar has the same depth as an array with no elements.
 In `simdjson_decode`, an array with a scalar is one level deeper than an array with no elements.
 For typical use cases, this shouldn't matter.
