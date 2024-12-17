@@ -73,11 +73,11 @@ Test '/code'
 int(123)
 int(123)
 Test '/code/0'
-Caught SimdJsonException: Invalid JSON pointer syntax.
-Caught SimdJsonException: Invalid JSON pointer syntax.
+Caught SimdJsonException: The JSON field referenced does not exist in this object.
+Caught SimdJsonException: The JSON field referenced does not exist in this object.
 Test '/code/x'
-Caught SimdJsonException: Invalid JSON pointer syntax.
-Caught SimdJsonException: Invalid JSON pointer syntax.
+Caught SimdJsonException: The JSON field referenced does not exist in this object.
+Caught SimdJsonException: The JSON field referenced does not exist in this object.
 Test '/values'
 array(1) {
   [0]=>

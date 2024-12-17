@@ -1,5 +1,7 @@
 --TEST--
 simdjson_encode() enum
+--SKIPIF--
+<?php if (PHP_VERSION_ID < 80100) echo "skip php 8.1+ only\n";
 --FILE--
 <?php
 
