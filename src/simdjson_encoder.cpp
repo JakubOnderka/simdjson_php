@@ -31,7 +31,9 @@
 
 #include "simdjson_encoder.h"
 #include "countlut.h"
+#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 #include "simdjson_vector8.h"
+#endif
 #include "simdjson.h"
 #include "simdjson_compatibility.h"
 #include "simdjson_smart_str.h"
@@ -60,7 +62,7 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
 	const char *whitespace = "\n                                ";
 
 	if (options & SIMDJSON_PRETTY_PRINT) {
-		next = smart_str_extend(buf, 4 * encoder->depth + 1);
+		next = simdjson_smart_str_extend(buf, 4 * encoder->depth + 1);
         if (EXPECTED(encoder->depth < 8)) {
         	memcpy(next, whitespace, encoder->depth * 4 + 1);
         } else {
@@ -465,13 +467,12 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 		char *output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s);
         // Iterate input string in chunks
 		for (; i < vlen; i += sizeof(simdjson_vector8)) {
-			// Check chunk if contains char that needs to be escaped
+			// Load chars to vector
 			simdjson_vector8_load(&chunk, (const uint8_t *) &s[i]);
-			if (UNEXPECTED(simdjson_vector8_has_le(chunk, (unsigned char) 0x1F) ||
-				simdjson_vector8_has(chunk, (unsigned char) '"') ||
-				simdjson_vector8_has(chunk, (unsigned char) '\\'))) {
-				break;
-            }
+			// Check chunk if contains char that needs to be escaped
+			if (UNEXPECTED(simdjson_vector8_need_escape(chunk))) {
+            	break;
+			}
             // If no escape char found, store chunk in output buffer and move buffer pointer
 			simdjson_vector8_store((uint8_t*)output, chunk);
             output += sizeof(simdjson_vector8);
@@ -486,7 +487,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 				goto finish;
 			}
 			char c = s[i++];
-			if (EXPECTED(simdjson_need_escaping[c] == 0)) {
+			if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
 				simdjson_smart_str_appendc_unsafe(buf, c);
 			} else {
 				simdjson_append_escape_char_unsafe(buf, c);
@@ -533,7 +534,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     size_t start = 0;
     for (pos = 0; pos < len; ++pos) {
     	char c = s[pos];
-    	if (EXPECTED(simdjson_need_escaping[c] == 0)) {
+    	if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
     		continue;
     	}
 

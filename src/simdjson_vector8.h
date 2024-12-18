@@ -3,12 +3,13 @@
 
 #ifdef __SSE2__
 #include <emmintrin.h>
-#endif
-#if defined(__aarch64__) || defined(_M_ARM64)
-#include <arm_neon.h>
+typedef __m128i simdjson_vector8;
 #endif
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
 typedef uint8x16_t simdjson_vector8;
+#endif
 
 static inline void simdjson_vector8_load(simdjson_vector8 *v, const uint8_t *s)
 {
@@ -22,7 +23,7 @@ static inline void simdjson_vector8_load(simdjson_vector8 *v, const uint8_t *s)
 static inline void simdjson_vector8_store(uint8_t *s, simdjson_vector8 v)
 {
 #ifdef __SSE2__
-    _mm_storeu_si128(s, v);
+    _mm_storeu_si128((simdjson_vector8*)s, v);
 #elif defined(__aarch64__) || defined(_M_ARM64)
     vst1q_u8(s, v);
 #endif
@@ -55,23 +56,45 @@ static inline simdjson_vector8 simdjson_vector8_eq(const simdjson_vector8 v1, co
 #endif
 }
 
-static inline bool simdjson_vector8_is_highbit_set(const simdjson_vector8 v)
+static inline bool simdjson_vector8_non_zero(const simdjson_vector8 v)
 {
 #ifdef __SSE2__
     return _mm_movemask_epi8(v) != 0;
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    return vmaxvq_u8(v) > 0x7F;
+    return vmaxvq_u8(v) != 0;
 #endif
 }
 
-static inline bool simdjson_vector8_has(const simdjson_vector8 v, const uint8_t c)
+static inline simdjson_vector8 simdjson_vector8_has_le(const simdjson_vector8 v1, const simdjson_vector8 v2)
 {
-    return simdjson_vector8_is_highbit_set(simdjson_vector8_eq(v, simdjson_vector8_broadcast(c)));
+#ifdef __SSE2__
+      return _mm_cmpeq_epi8(_mm_max_epu8(v1, v2), v2);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return vcleq_u8(v1, v2);
+#endif
 }
 
-static inline bool simdjson_vector8_has_le(const simdjson_vector8 v, const uint8_t c)
+static inline simdjson_vector8 simdjson_vector8_or(const simdjson_vector8 v1, const simdjson_vector8 v2)
 {
-    return simdjson_vector8_has(simdjson_vector8_ssub(v, simdjson_vector8_broadcast(c)), 0);
+#ifdef __SSE2__
+    return _mm_or_si128(v1, v2);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return vorrq_u8(v1, v2);
+#endif
+}
+
+/**
+* Check if given vector contais char that needs to be escaped in JSON (control char, quote or backslash)
+*/
+static inline bool simdjson_vector8_need_escape(const simdjson_vector8 v)
+{
+    simdjson_vector8 has_control = simdjson_vector8_has_le(v, simdjson_vector8_broadcast(0x1F));
+    simdjson_vector8 has_quote = simdjson_vector8_eq(v, simdjson_vector8_broadcast((unsigned char) '"'));
+    simdjson_vector8 has_backslash = simdjson_vector8_eq(v, simdjson_vector8_broadcast((unsigned char) '\\'));
+
+    simdjson_vector8 output = simdjson_vector8_or(has_control, has_quote);
+    output = simdjson_vector8_or(output, has_backslash);
+    return simdjson_vector8_non_zero(output);
 }
 
 #endif //SIMDJSON_VECTOR8_H

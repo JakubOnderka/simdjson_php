@@ -13,6 +13,13 @@ static zend_always_inline size_t simdjson_smart_str_alloc(smart_str *str, size_t
     return len;
 }
 
+static zend_always_inline char* simdjson_smart_str_extend(smart_str *dest, size_t len) {
+    size_t new_len = simdjson_smart_str_alloc(dest, len);
+    char *ret = ZSTR_VAL(dest->s) + ZSTR_LEN(dest->s);
+    ZSTR_LEN(dest->s) = new_len;
+    return ret;
+}
+
 static zend_always_inline void simdjson_smart_str_appendc_unsafe(smart_str *dest, char ch) {
     ZSTR_VAL(dest->s)[ZSTR_LEN(dest->s)++] = ch;
 }
