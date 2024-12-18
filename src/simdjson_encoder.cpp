@@ -34,6 +34,7 @@
 #include "simdjson_vector8.h"
 #include "simdjson.h"
 #include "simdjson_compatibility.h"
+#include "simdjson_smart_str.h"
 
 static zend_always_inline bool simdjson_check_stack_limit(void)
 {
@@ -46,12 +47,10 @@ static zend_always_inline bool simdjson_check_stack_limit(void)
 
 static inline void simdjson_pretty_print_colon(smart_str *buf, int options)
 {
-	ZEND_ASSERT(buf->s);
-
 	if (options & SIMDJSON_PRETTY_PRINT) {
-		smart_str_appendl(buf, ": ", 2);
+		simdjson_smart_str_appendl(buf, ": ", 2);
 	} else {
-		smart_str_appendc(buf, ':');
+		simdjson_smart_str_appendc(buf, ':');
     }
 }
 
@@ -59,8 +58,6 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
 {
   	char *next;
 	const char *whitespace = "\n                                ";
-
-	ZEND_ASSERT(buf->s);
 
 	if (options & SIMDJSON_PRETTY_PRINT) {
 		next = smart_str_extend(buf, 4 * encoder->depth + 1);
@@ -82,28 +79,16 @@ static inline void simdjson_append_double(smart_str *buf, double d)
 	size_t len;
 	char num[PHP_DOUBLE_MAX_LENGTH];
 
-	ZEND_ASSERT(buf->s);
 	php_gcvt(d, (int)PG(serialize_precision), '.', 'e', num);
 	len = strlen(num);
-	smart_str_appendl(buf, num, len);
+	simdjson_smart_str_appendl(buf, num, len);
 }
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number)
 {
-	ZEND_ASSERT(buf->s);
-
-	smart_str_alloc(buf, sizeof("-9223372036854775807") - 1, 0);
+	simdjson_smart_str_alloc(buf, sizeof("-9223372036854775807") - 1);
 	unsigned chars = simdjson_i64toa_countlut(number, ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s));
     ZSTR_LEN(buf->s) += chars;
-}
-
-static zend_always_inline void simdjson_smart_str_appendc_unsafe(smart_str *dest, char ch) {
-	ZSTR_VAL(dest->s)[ZSTR_LEN(dest->s)++] = ch;
-}
-
-static zend_always_inline void simdjson_smart_str_appendl_unsafe(smart_str *dest, const char* str, size_t len) {
-	memcpy(ZSTR_VAL(dest->s) + ZSTR_LEN(dest->s), str, len);
-	ZSTR_LEN(dest->s) += len;
 }
 
 #define SIMDJSON_HASH_PROTECT_RECURSION(_tmp_ht) \
@@ -127,7 +112,6 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
 
     ZEND_ASSERT(recursion_rc != NULL);
-	ZEND_ASSERT(buf->s);
 
 	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
@@ -136,7 +120,7 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 
 	SIMDJSON_HASH_PROTECT_RECURSION(recursion_rc);
 
-	smart_str_appendc(buf, '[');
+	simdjson_smart_str_appendc(buf, '[');
 	++encoder->depth;
 
 	ZEND_HASH_PACKED_FOREACH_VAL(table, data) {
@@ -145,7 +129,7 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 			SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
         	return FAILURE;
         }
-		smart_str_appendc(buf, ',');
+		simdjson_smart_str_appendc(buf, ',');
     } ZEND_HASH_FOREACH_END();
 
     ZSTR_LEN(buf->s)--; // remove last comma
@@ -159,7 +143,7 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 	--encoder->depth;
 
 	simdjson_pretty_print_nl_ident(buf, options, encoder);
-	smart_str_appendc(buf, ']');
+	simdjson_smart_str_appendc(buf, ']');
 
     return SUCCESS;
 }
@@ -173,7 +157,6 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
 
     ZEND_ASSERT(recursion_rc != NULL);
-	ZEND_ASSERT(buf->s);
 
 	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
@@ -182,12 +165,12 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
 	SIMDJSON_HASH_PROTECT_RECURSION(recursion_rc);
 
-	smart_str_appendc(buf, '{');
+	simdjson_smart_str_appendc(buf, '{');
 	++encoder->depth;
 
 	ZEND_HASH_FOREACH_KEY_VAL_IND(table, index, key, data) {
 		if (need_comma) {
-			smart_str_appendc(buf, ',');
+			simdjson_smart_str_appendc(buf, ',');
 		} else {
 			need_comma = 1;
 		}
@@ -200,9 +183,9 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 				return FAILURE;
 			}
 		} else {
-			smart_str_appendc(buf, '"');
+			simdjson_smart_str_appendc(buf, '"');
 			simdjson_append_long(buf, (zend_long) index);
-			smart_str_appendc(buf, '"');
+			simdjson_smart_str_appendc(buf, '"');
 		}
 
 		simdjson_pretty_print_colon(buf, options);
@@ -225,7 +208,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	if (need_comma) {
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 	}
-	smart_str_appendc(buf, '}');
+	simdjson_smart_str_appendc(buf, '}');
 
 	return SUCCESS;
 }
@@ -247,7 +230,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 
 	SIMDJSON_HASH_PROTECT_RECURSION(obj);
 
-	smart_str_appendc(buf, '{');
+	simdjson_smart_str_appendc(buf, '{');
 	++encoder->depth;
 
 	for (int i = 0; i < ce->default_properties_count; i++) {
@@ -265,7 +248,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 		}
 
 		if (need_comma) {
-			smart_str_appendc(buf, ',');
+			simdjson_smart_str_appendc(buf, ',');
 		} else {
 			need_comma = 1;
 		}
@@ -295,7 +278,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 	if (need_comma) {
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 	}
-	smart_str_appendc(buf, '}');
+	simdjson_smart_str_appendc(buf, '}');
 	return SUCCESS;
 }
 
@@ -326,7 +309,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 		myht = Z_ARRVAL_P(val);
         // Array is empty
 		if (zend_hash_num_elements(myht) == 0) {
-			smart_str_appendl(buf, "[]", 2);
+			simdjson_smart_str_appendl(buf, "[]", 2);
 			return SUCCESS;
 		}
         if (zend_array_is_list(myht)) {
@@ -362,7 +345,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 	SIMDJSON_HASH_PROTECT_RECURSION(recursion_rc);
 
-	smart_str_appendc(buf, '{');
+	simdjson_smart_str_appendc(buf, '{');
 
 	++encoder->depth;
 
@@ -401,7 +384,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 #endif
 
 				if (need_comma) {
-					smart_str_appendc(buf, ',');
+					simdjson_smart_str_appendc(buf, ',');
 				} else {
 					need_comma = 1;
 				}
@@ -415,16 +398,16 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 				}
 			} else {
 				if (need_comma) {
-					smart_str_appendc(buf, ',');
+					simdjson_smart_str_appendc(buf, ',');
 				} else {
 					need_comma = 1;
 				}
 
 				simdjson_pretty_print_nl_ident(buf, options, encoder);
 
-				smart_str_appendc(buf, '"');
+				simdjson_smart_str_appendc(buf, '"');
 				simdjson_append_long(buf, (zend_long) index);
-				smart_str_appendc(buf, '"');
+				simdjson_smart_str_appendc(buf, '"');
 			}
 
 			simdjson_pretty_print_colon(buf, options);
@@ -453,7 +436,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 		simdjson_pretty_print_nl_ident(buf, options, encoder);
 	}
 
-	smart_str_appendc(buf, '}');
+	simdjson_smart_str_appendc(buf, '}');
 
 	zend_release_properties(myht);
 	return SUCCESS;
@@ -467,41 +450,40 @@ static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
-	size_t copypos = 0;
 	size_t i = 0;
 	simdjson_vector8 chunk;
 
     // vlen = len - (len % sizeof(simdjson_vector8))
 	size_t vlen = len & (int) (~(sizeof(simdjson_vector8) - 1));
 
-	ZEND_ASSERT(buf->s);
-
-	smart_str_alloc(buf, len + 2, 0);
+	simdjson_smart_str_alloc(buf, len + 2);
 	simdjson_smart_str_appendc_unsafe(buf, '"');
 
 	for (;;) {
-        // Check chunk if contains char that needs to be escaped
+        // Make sure that the whole processed input string will fit in buffer
+		simdjson_smart_str_alloc(buf, len - i + 1);
+		char *output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s);
+        // Iterate input string in chunks
 		for (; i < vlen; i += sizeof(simdjson_vector8)) {
+			// Check chunk if contains char that needs to be escaped
 			simdjson_vector8_load(&chunk, (const uint8_t *) &s[i]);
 			if (UNEXPECTED(simdjson_vector8_has_le(chunk, (unsigned char) 0x1F) ||
 				simdjson_vector8_has(chunk, (unsigned char) '"') ||
 				simdjson_vector8_has(chunk, (unsigned char) '\\'))) {
 				break;
             }
+            // If no escape char found, store chunk in output buffer and move buffer pointer
+			simdjson_vector8_store((uint8_t*)output, chunk);
+            output += sizeof(simdjson_vector8);
 		}
-
-		if (copypos < i) {
-			smart_str_appendl(buf, &s[copypos], i - copypos);
-			copypos = i;
-		}
+		ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
 
         // Ensure that buf contains enoug space that we can call unsafe methods
-		smart_str_alloc(buf, sizeof(simdjson_vector8) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1, 0);
+		simdjson_smart_str_alloc(buf, sizeof(simdjson_vector8) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
 
 		for (int b = 0; b < sizeof(simdjson_vector8); b++) {
 			if (UNEXPECTED(i == len)) {
-				simdjson_smart_str_appendc_unsafe(buf, '"');
-                return;
+				goto finish;
 			}
 			char c = s[i++];
 			if (EXPECTED(simdjson_need_escaping[c] == 0)) {
@@ -510,9 +492,9 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 				simdjson_append_escape_char_unsafe(buf, c);
 			}
 		}
-		copypos = i;
 	}
 
+finish:
 	simdjson_smart_str_appendc_unsafe(buf, '"');
 }
 #endif
@@ -522,10 +504,8 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 	size_t pos, len = ZSTR_LEN(str);
     const char *s = ZSTR_VAL(str);
 
-	ZEND_ASSERT(buf->s);
-
 	if (len == 0) {
-		smart_str_appendl(buf, "\"\"", 2);
+		simdjson_smart_str_appendl(buf, "\"\"", 2);
 		return SUCCESS;
 	}
 
@@ -547,7 +527,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 
     // For short strings allocate maximum possible string length, so we can use
     // unsafe methods for string copying
-    smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2, 0);
+    simdjson_smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2);
     simdjson_smart_str_appendc_unsafe(buf, '"');
 
     size_t start = 0;
@@ -676,19 +656,18 @@ static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, 
 
 zend_result simdjson_encode_zval(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
 {
-	ZEND_ASSERT(buf->s);
 again:
 	switch (Z_TYPE_P(val))
 	{
 		case IS_NULL:
-			smart_str_appendl(buf, "null", 4);
+			simdjson_smart_str_appendl(buf, "null", 4);
 			break;
 
 		case IS_TRUE:
-			smart_str_appendl(buf, "true", 4);
+			simdjson_smart_str_appendl(buf, "true", 4);
 			break;
 		case IS_FALSE:
-			smart_str_appendl(buf, "false", 5);
+			simdjson_smart_str_appendl(buf, "false", 5);
 			break;
 
 		case IS_LONG:

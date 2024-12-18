@@ -19,6 +19,15 @@ static inline void simdjson_vector8_load(simdjson_vector8 *v, const uint8_t *s)
 #endif
 }
 
+static inline void simdjson_vector8_store(uint8_t *s, simdjson_vector8 v)
+{
+#ifdef __SSE2__
+    _mm_storeu_si128(s, v);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    vst1q_u8(s, v);
+#endif
+}
+
 static inline simdjson_vector8 simdjson_vector8_ssub(const simdjson_vector8 v1, const simdjson_vector8 v2)
 {
 #ifdef __SSE2__
