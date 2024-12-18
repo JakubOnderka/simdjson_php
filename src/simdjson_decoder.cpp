@@ -175,9 +175,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
         zval *data;
         ZEND_ASSERT(&p->val != pData);
         data = &p->val;
-        if (ht->pDestructor) {
-            ht->pDestructor(data);
-        }
+        ht->pDestructor(data); // destructor is always defined for this array
         ZVAL_COPY_VALUE(data, pData);
     } else {
         idx = ht->nNumUsed++;
