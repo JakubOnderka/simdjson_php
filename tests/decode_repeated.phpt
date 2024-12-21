@@ -1,5 +1,9 @@
 --TEST--
 simdjson_decode repeated strings
+--SKIPIF--
+<?php
+if (PHP_VERSION_ID < 80200) echo "skip deduplication is supported since PHP 8.2\n";
+?>
 --FILE--
 <?php
 $json = '[{"ahoj":"svete"},{"ahoj":"moravo"}]';
