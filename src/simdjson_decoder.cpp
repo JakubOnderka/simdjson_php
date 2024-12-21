@@ -322,10 +322,20 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
                 /* Reuse the immutable empty array to save memory */
                 ZVAL_EMPTY_ARRAY(return_value);
                 break;
+            } else if (UNEXPECTED(json_array.size() == 0xFFFFFF)) {
+                /* Support array that contains more that 0xFFFFFF elements */
+                zend_array *arr = simdjson_init_packed_array(return_value, 0xFFFFFF);
+                for (simdjson::dom::element child : json_array) {
+             	   zval array_element;
+          	       simdjson_create_array(child, &array_element, repeated_key_strings);
+         	       zend_hash_next_index_insert_new(arr, &array_element);
+         	   }
+               break;
             }
 
             zend_array *arr = simdjson_init_packed_array(return_value, json_array.size());
 #if PHP_VERSION_ID >= 80200
+            /* Optimised variant of adding elements to array with known size available since PHP 8.2 */
             ZEND_HASH_FILL_PACKED(arr) {
                 for (simdjson::dom::element child : json_array) {
                     simdjson_create_array(child, __fill_val, repeated_key_strings);
@@ -408,7 +418,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                     ZVAL_NULL(return_value);
                     return error;
                 }
-                zend_hash_next_index_insert(arr, &value);
+                zend_hash_next_index_insert_new(arr, &value);
             }
             break;
         }
@@ -420,8 +430,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
                 size_t size = field.key.size();
-				/* PHP 7.1 allowed using the empty string as a property of an object */
-                if (UNEXPECTED(data[0] == '\0') && (PHP_VERSION_ID < 70100 || UNEXPECTED(size > 0))) {
+                if (UNEXPECTED(data[0] == '\0' && size > 0)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
                     /* Use a number that won't be in the simdjson bindings */
@@ -429,7 +438,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                 }
                 zval value;
                 simdjson_php_error_code error = simdjson_create_object(field.value, &value);
-                if (error) {
+                if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
                     return error;
