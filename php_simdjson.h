@@ -64,6 +64,11 @@ extern zend_module_entry simdjson_module_entry;
 #define SIMDJSON_PARSE_DEFAULT_DEPTH          512
 
 /*
+ * Number of strings in array of array or object keys that will be deduplicated
+ */
+#define SIMDJSON_REPEATED_STRINGS_COUNT       128
+
+/*
  * NOTE: Namespaces and references(&) are C++ only functionality.
  * To expose this functionality to other C PECLs,
  * switch to a forward struct declaration of a struct that only wraps simdjson::dom::parser

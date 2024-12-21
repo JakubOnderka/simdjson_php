@@ -13,6 +13,7 @@
 #ifndef SIMDJSON_PHP_BINDINGS_IMPL_H
 #define SIMDJSON_PHP_BINDINGS_IMPL_H
 
+#include "php.h"
 #include "simdjson.h"
 
 // NOTE: Namespaces are C++ only functionality.
@@ -21,6 +22,7 @@
 struct simdjson_php_parser {
 public:
     simdjson::dom::parser parser;
+    HashTable repeated_key_strings;
 };
 
 #endif
