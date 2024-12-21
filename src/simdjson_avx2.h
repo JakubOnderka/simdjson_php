@@ -8,16 +8,12 @@
 
 typedef __m256i simdjson_avx2;
 
-TARGET_AVX2 static inline void simdjson_avx2_load(simdjson_avx2 *v, const uint8_t *s) {
-    *v = _mm256_loadu_si256((const simdjson_avx2 *) s);
+TARGET_AVX2 static inline simdjson_avx2 simdjson_avx2_load(const uint8_t *s) {
+    return _mm256_loadu_si256((const simdjson_avx2 *) s);
 }
 
 TARGET_AVX2 static inline void simdjson_avx2_store(uint8_t *s, simdjson_avx2 v) {
     _mm256_storeu_si256((simdjson_avx2*)s, v);
-}
-
-TARGET_AVX2 static inline simdjson_avx2 simdjson_avx2_ssub(const simdjson_avx2 v1, const simdjson_avx2 v2) {
-    return _mm256_subs_epu8(v1, v2);
 }
 
 TARGET_AVX2 static inline simdjson_avx2 simdjson_avx2_broadcast(const uint8_t c) {

@@ -456,7 +456,6 @@ static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf
 #ifdef __SSE2__
 TARGET_AVX2 static void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
 	size_t i = 0;
-	simdjson_avx2 chunk;
 
     // vlen = len - (len % sizeof(T))
 	size_t vlen = len & (int) (~(sizeof(simdjson_avx2) - 1));
@@ -471,7 +470,7 @@ TARGET_AVX2 static void simdjson_escape_long_string_avx2(smart_str *buf, const c
         // Iterate input string in chunks
 		for (; i < vlen; i += sizeof(simdjson_avx2)) {
             // Load chars to vector
-            simdjson_avx2_load(&chunk, (const uint8_t *) &s[i]);
+            simdjson_avx2 chunk = simdjson_avx2_load((const uint8_t *) &s[i]);
 			// Check chunk if contains char that needs to be escaped
 			if (UNEXPECTED(simdjson_avx2_need_escape(chunk))) {
             	break;
@@ -506,7 +505,6 @@ finish:
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
 	size_t i = 0;
-	simdjson_vector8 chunk;
 
     // vlen = len - (len % sizeof(simdjson_vector8))
 	size_t vlen = len & (int) (~(sizeof(simdjson_vector8) - 1));
@@ -521,7 +519,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
         // Iterate input string in chunks
 		for (; i < vlen; i += sizeof(simdjson_vector8)) {
 			// Load chars to vector
-			simdjson_vector8_load(&chunk, (const uint8_t *) &s[i]);
+			simdjson_vector8 chunk = simdjson_vector8_load((const uint8_t *) &s[i]);
 			// Check chunk if contains char that needs to be escaped
 			if (UNEXPECTED(simdjson_vector8_need_escape(chunk))) {
             	break;
