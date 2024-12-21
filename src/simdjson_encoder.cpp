@@ -34,6 +34,9 @@
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 #include "simdjson_vector8.h"
 #endif
+#if defined(__SSE2__)
+#include "simdjson_avx2.h"
+#endif
 #include "simdjson.h"
 #include "simdjson_compatibility.h"
 #include "simdjson_smart_str.h"
@@ -450,6 +453,56 @@ static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf
 	ZSTR_LEN(buf->s) += append.len;
 }
 
+#ifdef __SSE2__
+TARGET_AVX2 static void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
+	size_t i = 0;
+	simdjson_avx2 chunk;
+
+    // vlen = len - (len % sizeof(T))
+	size_t vlen = len & (int) (~(sizeof(simdjson_avx2) - 1));
+
+	simdjson_smart_str_alloc(buf, len + 2);
+	simdjson_smart_str_appendc_unsafe(buf, '"');
+
+	for (;;) {
+        // Make sure that the whole processed input string will fit in buffer
+		simdjson_smart_str_alloc(buf, len - i + 1);
+		char *output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s);
+        // Iterate input string in chunks
+		for (; i < vlen; i += sizeof(simdjson_avx2)) {
+            // Load chars to vector
+            simdjson_avx2_load(&chunk, (const uint8_t *) &s[i]);
+			// Check chunk if contains char that needs to be escaped
+			if (UNEXPECTED(simdjson_avx2_need_escape(chunk))) {
+            	break;
+			}
+            // If no escape char found, store chunk in output buffer and move buffer pointer
+			simdjson_avx2_store((uint8_t*)output, chunk);
+            output += sizeof(simdjson_avx2);
+		}
+		ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+
+        // Ensure that buf contains enoug space that we can call unsafe methods
+		simdjson_smart_str_alloc(buf, sizeof(simdjson_avx2) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
+
+		for (int b = 0; b < sizeof(simdjson_avx2); b++) {
+			if (UNEXPECTED(i == len)) {
+				goto finish;
+			}
+			char c = s[i++];
+			if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+				simdjson_smart_str_appendc_unsafe(buf, c);
+			} else {
+				simdjson_append_escape_char_unsafe(buf, c);
+			}
+		}
+	}
+
+finish:
+	simdjson_smart_str_appendc_unsafe(buf, '"');
+}
+#endif
+
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
 	size_t i = 0;
@@ -518,6 +571,13 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 
     // Mark string as valid UTF-8
 	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+
+#ifdef __SSE2__
+   if (len >= sizeof(simdjson_avx2) && __builtin_cpu_supports("avx2")) {
+     	simdjson_escape_long_string_avx2(buf, s, len);
+        return SUCCESS;
+   }
+#endif
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
     if (len >= sizeof(simdjson_vector8)) {
