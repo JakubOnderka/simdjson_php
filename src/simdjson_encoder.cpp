@@ -800,3 +800,17 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
 	ZSTR_LEN(buf->s) = 0; // clenaup buffer
     return SUCCESS;
 }
+
+const char* simdjson_encode_implementation() {
+#ifdef __SSE2__
+      if (__builtin_cpu_supports("avx2")) {
+          return "AVX2";
+      } else {
+          return "SSE2";
+      }
+#elif defined(__aarch64__) || defined(_M_ARM64)
+      return "ARM64 NEON";
+#else
+      return "Generic";
+#endif
+}

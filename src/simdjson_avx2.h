@@ -1,5 +1,5 @@
-#ifndef SIMDJSON_VECTOR8_TARGET_AVX256_H
-#define SIMDJSON_VECTOR8_TARGET_AVX256_H
+#ifndef SIMDJSON_VECTOR8_TARGET_AVX2_H
+#define SIMDJSON_VECTOR8_TARGET_AVX2_H
 
 #include <stdint.h>
 #include <x86intrin.h>
@@ -49,4 +49,4 @@ TARGET_AVX2 static inline bool simdjson_avx2_need_escape(const simdjson_avx2 v) 
     return simdjson_avx2_non_zero(output);
 }
 
-#endif //SIMDJSON_VECTOR8_TARGET_AVX256_H
+#endif //SIMDJSON_VECTOR8_TARGET_AVX2_H

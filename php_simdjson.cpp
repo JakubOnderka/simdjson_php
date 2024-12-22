@@ -480,11 +480,12 @@ PHP_RSHUTDOWN_FUNCTION (simdjson) {
 */
 PHP_MINFO_FUNCTION (simdjson) {
     php_info_print_table_start();
-    php_info_print_table_header(2, "simdjson support", "enabled");
 
+    php_info_print_table_row(2, "simdjson support", "enabled");
     php_info_print_table_row(2, "Version", PHP_SIMDJSON_VERSION);
     php_info_print_table_row(2, "Support", SIMDJSON_SUPPORT_URL);
-    php_info_print_table_row(2, "Implementation", simdjson::get_active_implementation()->description().c_str());
+    php_info_print_table_row(2, "Decoder implementation", simdjson::get_active_implementation()->description().c_str());
+    php_info_print_table_row(2, "Encoder implementation", simdjson_encode_implementation());
 
     php_info_print_table_end();
 }

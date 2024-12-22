@@ -112,4 +112,6 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 
 zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encoder);
 
+const char* simdjson_encode_implementation();
+
 #endif //SIMDJSON_ENCODER_H
