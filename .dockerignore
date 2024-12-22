@@ -20,7 +20,6 @@ docker_*
 **/configure
 **/configure.in
 **/install-sh
-**/jsonexamples/
 **/ltmain.sh
 **/missing
 **/mkinstalldirs
