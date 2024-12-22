@@ -1,83 +1,61 @@
 #ifndef SIMDJSON_VECTOR8_H
 #define SIMDJSON_VECTOR8_H
 
+// SSE2
 #ifdef __SSE2__
 #include <emmintrin.h>
-typedef __m128i simdjson_vector8;
+
+#define simdjson_vector8_broadcast _mm_set1_epi8
+#define simdjson_vector8_eq _mm_cmpeq_epi8
+#define simdjson_vector8_or _mm_or_si128
+#define simdjson_vector8_has_le(_v1, _v2) _mm_cmpeq_epi8(_mm_max_epu8(_v1, _v2), _v2)
+#define simdjson_vector8_non_zero(_v) _mm_movemask_epi8(_v) != 0
 #endif
 
+// NEON
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include <arm_neon.h>
-typedef uint8x16_t simdjson_vector8;
+
+#define simdjson_vector8_broadcast vdupq_n_u8
+#define simdjson_vector8_eq vceqq_u8
+#define simdjson_vector8_or vorrq_u8
+#define simdjson_vector8_has_le vcleq_u8
+#define simdjson_vector8_non_zero(_v) vmaxvq_u32(vreinterpretq_u32_u8(_v)) != 0
 #endif
 
-static inline simdjson_vector8 simdjson_vector8_load(const uint8_t *s) {
+
+struct simdjson_vector8 {
 #ifdef __SSE2__
-    return _mm_loadu_si128((const __m128i *) s);
+    __m128i chunk;
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    return vld1q_u8(s);
+    uint8x16_t chunk;
 #endif
-}
 
-static inline void simdjson_vector8_store(uint8_t *s, simdjson_vector8 v) {
+    inline void load(const uint8_t *s) {
 #ifdef __SSE2__
-    _mm_storeu_si128((simdjson_vector8*)s, v);
+        chunk = _mm_loadu_si128((const __m128i *) s);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    vst1q_u8(s, v);
+        chunk = vld1q_u8(s);
 #endif
-}
+    }
 
-static inline simdjson_vector8 simdjson_vector8_broadcast(const uint8_t c) {
+    inline void store(uint8_t *s) {
 #ifdef __SSE2__
-    return _mm_set1_epi8(c);
+        _mm_storeu_si128((__m128i*)s, chunk);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-    return vdupq_n_u8(c);
+        vst1q_u8(s, chunk);
 #endif
-}
+    }
 
-static inline simdjson_vector8 simdjson_vector8_eq(const simdjson_vector8 v1, const simdjson_vector8 v2) {
-#ifdef __SSE2__
-    return _mm_cmpeq_epi8(v1, v2);
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return vceqq_u8(v1, v2);
-#endif
-}
+    inline bool needs_escaping() {
+        auto has_control = simdjson_vector8_has_le(chunk, simdjson_vector8_broadcast(0x1F));
+        auto has_quote = simdjson_vector8_eq(chunk, simdjson_vector8_broadcast((unsigned char) '"'));
+        auto has_backslash = simdjson_vector8_eq(chunk, simdjson_vector8_broadcast((unsigned char) '\\'));
 
-static inline bool simdjson_vector8_non_zero(const simdjson_vector8 v) {
-#ifdef __SSE2__
-    return _mm_movemask_epi8(v) != 0;
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return vmaxvq_u32(vreinterpretq_u32_u8(v)) != 0;
-#endif
-}
-
-static inline simdjson_vector8 simdjson_vector8_has_le(const simdjson_vector8 v1, const simdjson_vector8 v2) {
-#ifdef __SSE2__
-    return _mm_cmpeq_epi8(_mm_max_epu8(v1, v2), v2);
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return vcleq_u8(v1, v2);
-#endif
-}
-
-static inline simdjson_vector8 simdjson_vector8_or(const simdjson_vector8 v1, const simdjson_vector8 v2) {
-#ifdef __SSE2__
-    return _mm_or_si128(v1, v2);
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return vorrq_u8(v1, v2);
-#endif
-}
-
-/**
-* Check if given vector contais char that needs to be escaped in JSON (control char, quote or backslash)
-*/
-static inline bool simdjson_vector8_need_escape(const simdjson_vector8 v) {
-    simdjson_vector8 has_control = simdjson_vector8_has_le(v, simdjson_vector8_broadcast(0x1F));
-    simdjson_vector8 has_quote = simdjson_vector8_eq(v, simdjson_vector8_broadcast((unsigned char) '"'));
-    simdjson_vector8 has_backslash = simdjson_vector8_eq(v, simdjson_vector8_broadcast((unsigned char) '\\'));
-
-    simdjson_vector8 output = simdjson_vector8_or(has_control, has_quote);
-    output = simdjson_vector8_or(output, has_backslash);
-    return simdjson_vector8_non_zero(output);
-}
+        auto output = simdjson_vector8_or(has_control, has_quote);
+        output = simdjson_vector8_or(output, has_backslash);
+        return simdjson_vector8_non_zero(output);
+    }
+};
 
 #endif //SIMDJSON_VECTOR8_H
