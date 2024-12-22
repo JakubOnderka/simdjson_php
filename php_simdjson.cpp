@@ -350,7 +350,7 @@ PHP_FUNCTION(simdjson_encode_to_stream)
     encoder.max_depth = (int)depth;
     encoder.stream = stream;
 
-    if (php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_EX)) {
+    if (options & SIMDJSON_LOCK_EX && php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_EX)) {
         php_error_docref(NULL, E_WARNING, "Could not lock stream for writing");
         RETURN_FALSE;
     }
@@ -365,7 +365,7 @@ PHP_FUNCTION(simdjson_encode_to_stream)
     simdjson_encode_write_stream(&buf, &encoder); // write rest
     efree(buf.s);
 
-    if (php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_UN)) {
+    if (options & SIMDJSON_LOCK_EX && php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_UN)) {
         php_error_docref(NULL, E_WARNING, "Could not unlock stream");
         RETURN_FALSE;
     }

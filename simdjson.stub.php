@@ -12,6 +12,11 @@ const SIMDJSON_PRETTY_PRINT = UNKNOWN;
  * @cvalue SIMDJSON_APPEND_NEWLINE
  */
 const SIMDJSON_APPEND_NEWLINE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_LOCK_EX
+ */
+const SIMDJSON_LOCK_EX = UNKNOWN;
 
 /**
  * @var int
