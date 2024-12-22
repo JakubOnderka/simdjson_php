@@ -66,12 +66,12 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
 
 	if (options & SIMDJSON_PRETTY_PRINT) {
 		next = simdjson_smart_str_extend(buf, 4 * encoder->depth + 1);
-        if (EXPECTED(encoder->depth < 8)) {
+        if (EXPECTED(encoder->depth <= 8)) {
         	memcpy(next, whitespace, encoder->depth * 4 + 1);
         } else {
-        	next[0] = '\n';
-        	next++;
-			for (size_t i = 0; i < encoder->depth; ++i) {
+            memcpy(next, whitespace, 8 * 4 + 1);
+        	next += 8 * 4 + 1;
+			for (size_t i = 8; i < encoder->depth; ++i) {
 	            memcpy(next, "    ", 4);
 	            next += 4;
 			}
