@@ -242,25 +242,20 @@ PHP_FUNCTION(simdjson_is_valid_utf8) {
         Z_PARAM_STR(string)
     ZEND_PARSE_PARAMETERS_END();
 
-#ifdef IS_STR_VALID_UTF8
     // If string was already successfully validated, just return true
     if (ZSTR_IS_VALID_UTF8(string)) {
         RETURN_TRUE;
     }
-#endif
 
     bool is_ok = simdjson::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
-#ifdef IS_STR_VALID_UTF8
     if (EXPECTED(is_ok)) {
         // String is UTF-8 valid, so we can also set proper flag
         GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
     }
-#endif
     RETURN_BOOL(is_ok);
 }
 
-static const char *php_json_get_error_msg(simdjson_error_code error_code)
-{
+static const char *simdjson_get_error_msg(simdjson_error_code error_code) {
     switch(error_code) {
         case SIMDJSON_ERROR_NONE:
             return "No error";
@@ -293,8 +288,21 @@ static const char *php_json_get_error_msg(simdjson_error_code error_code)
     }
 }
 
-PHP_FUNCTION(simdjson_encode)
-{
+static zend_always_inline bool simdjson_validate_encode_depth(const zend_long depth, const int arg_num) {
+    if (UNEXPECTED(depth <= 0)) {
+        zend_argument_value_error(arg_num, "must be greater than 0");
+        return false;
+    }
+
+    if (UNEXPECTED(depth > INT_MAX)) {
+        zend_argument_value_error(arg_num, "must be less than %d", INT_MAX);
+        return false;
+    }
+
+    return true;
+}
+
+PHP_FUNCTION(simdjson_encode) {
     zval *parameter;
     simdjson_encoder encoder = {0};
     smart_str buf = {0};
@@ -308,6 +316,10 @@ PHP_FUNCTION(simdjson_encode)
         Z_PARAM_LONG(depth)
     ZEND_PARSE_PARAMETERS_END();
 
+    if (!simdjson_validate_encode_depth(depth, 3)) {
+        RETURN_THROWS();
+    }
+
     encoder.max_depth = (int)depth;
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
@@ -315,7 +327,7 @@ PHP_FUNCTION(simdjson_encode)
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
         efree(buf.s);
-        zend_throw_exception(simdjson_exception_ce, php_json_get_error_msg(encoder.error_code), encoder.error_code);
+        zend_throw_exception(simdjson_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
         RETURN_THROWS();
     }
 
@@ -326,8 +338,7 @@ PHP_FUNCTION(simdjson_encode)
     RETURN_STR(smart_str_extract(&buf));
 }
 
-PHP_FUNCTION(simdjson_encode_to_stream)
-{
+PHP_FUNCTION(simdjson_encode_to_stream) {
     zval *res;
     zval *parameter;
     simdjson_encoder encoder = {0};
@@ -346,6 +357,10 @@ PHP_FUNCTION(simdjson_encode_to_stream)
 
     ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
     php_stream_from_res(stream, Z_RES_P(res));
+
+    if (!simdjson_validate_encode_depth(depth, 4)) {
+        RETURN_THROWS();
+    }
 
     encoder.max_depth = (int)depth;
     encoder.stream = stream;
@@ -371,7 +386,7 @@ PHP_FUNCTION(simdjson_encode_to_stream)
     }
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
-        zend_throw_exception(simdjson_exception_ce, php_json_get_error_msg(encoder.error_code), encoder.error_code);
+        zend_throw_exception(simdjson_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
         RETURN_THROWS();
     }
 

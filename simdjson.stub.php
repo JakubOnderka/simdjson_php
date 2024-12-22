@@ -134,12 +134,38 @@ function simdjson_key_count(string $json, string $key, int $depth = 512, bool $t
  */
 function simdjson_key_exists(string $json, string $key, int $depth = 512): bool {}
 
+/**
+ * Release memory allocated by simdjson parser
+ */
 function simdjson_cleanup(): true {}
 
+/**
+ * Check is string is valid UTF-8 encoded string
+ *
+ * @param string $string
+ * @return bool
+ */
 function simdjson_is_valid_utf8(string $string): bool {}
 
-function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string|false {}
+/**
+ * Returns the JSON representation of a value
+ *
+ * @param mixed $value The value being encoded. Can be any type except a resource.
+ * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT or SIMDJSON_APPEND_NEWLINE.
+ * @param int $depth Set the maximum depth. Must be greater than zero.
+ * @return string
+ */
+function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string {}
 
+/**
+ * Writes the JSON representation of a value to given stream
+ *
+  * @param mixed $value The value being encoded. Can be any type except a resource.
+  * @param resource $res A file system pointer resource that is typically created using fopen().
+  * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT, SIMDJSON_APPEND_NEWLINE or SIMDJSON_LOCK_EX.
+  * @param int $depth Set the maximum depth. Must be greater than zero.
+  * @return string
+ */
 function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, int $depth = 512) : bool {}
 
 /**
