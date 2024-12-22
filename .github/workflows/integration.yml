@@ -120,3 +120,31 @@ jobs:
             cat $FILE
             echo
           done
+
+  Macos:
+    runs-on: macos-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.1', '8.2', '8.3', '8.4']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: json
+          coverage: none
+          tools: none
+
+      - name: Build simdjson
+        run: |
+          phpize
+          ./configure
+          make 
+
+      - name: Run tests
+        run: make test TESTS="--show-diff"
