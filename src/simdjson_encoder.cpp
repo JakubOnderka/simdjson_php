@@ -91,7 +91,7 @@ static inline void simdjson_append_double(smart_str *buf, double d)
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number)
 {
-	simdjson_smart_str_alloc(buf, sizeof("-9223372036854775807") - 1);
+	simdjson_smart_str_alloc(buf, strlen("-9223372036854775807"));
 	unsigned chars = simdjson_i64toa_countlut(number, ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s));
     ZSTR_LEN(buf->s) += chars;
 }
@@ -715,6 +715,13 @@ static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, 
 
 zend_result simdjson_encode_zval(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
 {
+    // For simdjson_encode_to_stream method, write data to stream if buffer is larger than 64 kilobytes
+    if (UNEXPECTED(encoder->stream != NULL && ZSTR_LEN(buf->s) >= 64 * 1024)) {
+    	if (simdjson_encode_write_stream(buf, encoder) == FAILURE) {
+          	return FAILURE;
+    	}
+    }
+
 again:
 	switch (Z_TYPE_P(val))
 	{
@@ -775,13 +782,6 @@ again:
 			encoder->error_code = SIMDJSON_ERROR_UNSUPPORTED_TYPE;
 			return FAILURE;
 	}
-
-    // For simdjson_encode_to_stream method, write data to stream if buffer is larger than 4096 bytes
-    if (UNEXPECTED(encoder->stream != NULL && ZSTR_LEN(buf->s) >= 4 * 1024)) {
-    	if (simdjson_encode_write_stream(buf, encoder) == FAILURE) {
-          	return FAILURE;
-    	}
-    }
 
 	return SUCCESS;
 }

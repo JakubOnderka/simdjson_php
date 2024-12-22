@@ -370,7 +370,8 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
         RETURN_FALSE;
     }
 
-    smart_str_erealloc(&buf, 1024 * 8);
+    // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
+    smart_str_erealloc(&buf, 200);
     simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
 
     if (options & SIMDJSON_APPEND_NEWLINE) {
