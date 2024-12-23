@@ -91,8 +91,8 @@ static inline void simdjson_append_double(smart_str *buf, double d)
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number)
 {
-	simdjson_smart_str_alloc(buf, strlen("-9223372036854775807"));
-	unsigned chars = simdjson_i64toa_countlut(number, ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s));
+	char *output = simdjson_smart_str_alloc(buf, strlen("-9223372036854775807"));
+	unsigned chars = simdjson_i64toa_countlut(number, output);
     ZSTR_LEN(buf->s) += chars;
 }
 
@@ -447,59 +447,75 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 	return SUCCESS;
 }
 
-static zend_always_inline void simdjson_append_escape_char_unsafe(smart_str *buf, char c) {
+static zend_always_inline size_t simdjson_append_escape(char *buf, const char c) {
 	auto append = simdjson_escape[c];
-	memcpy(ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s), append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
-	ZSTR_LEN(buf->s) += append.len;
+	memcpy(buf, append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
+	return append.len;
 }
 
+#define ZSTR_ALLOC(_size) \
+      do { \
+          auto _new_len = _size + ZSTR_LEN(buf->s); \
+          if (UNEXPECTED(_new_len >= buf->a)) { \
+              ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s))); \
+              smart_str_erealloc(buf, _new_len); \
+              output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
+          } \
+      } while (0); \
+
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
-template<typename T> static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
+template<typename T>
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
 	size_t i = 0;
     T chunk;
+    char *output;
 
     // vlen = len - (len % sizeof(simdjson_vector8))
 	size_t vlen = len & (int) (~(sizeof(chunk) - 1));
 
-	simdjson_smart_str_alloc(buf, len + 2);
-	simdjson_smart_str_appendc_unsafe(buf, '"');
+	output = simdjson_smart_str_alloc(buf, len + 2);
+    *output++ = '"';
 
-	for (;;) {
-        // Make sure that the whole processed input string will fit in buffer
-		simdjson_smart_str_alloc(buf, len - i + 1);
-		char *output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s);
-        // Iterate input string in chunks
-		for (; i < vlen; i += sizeof(chunk)) {
-			// Load chars to vector
-			chunk.load((const uint8_t *) &s[i]);
-			// Check chunk if contains char that needs to be escaped
-			if (UNEXPECTED(chunk.needs_escaping())) {
-            	break;
-			}
+    // Iterate input string in chunks
+	for (; i < vlen; i += sizeof(chunk)) {
+		// Load chars to vector
+		chunk.load((const uint8_t *) &s[i]);
+		// Check chunk if contains char that needs to be escaped
+		if (EXPECTED(!chunk.needs_escaping())) {
             // If no escape char found, store chunk in output buffer and move buffer pointer
 			chunk.store((uint8_t*)output);
             output += sizeof(chunk);
-		}
-		ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
-
-        // Ensure that buf contains enoug space that we can call unsafe methods
-		simdjson_smart_str_alloc(buf, sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
-
-		for (int b = 0; b < sizeof(chunk); b++) {
-			if (UNEXPECTED(i == len)) {
-				goto finish;
-			}
-			char c = s[i++];
-			if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-				simdjson_smart_str_appendc_unsafe(buf, c);
-			} else {
-				simdjson_append_escape_char_unsafe(buf, c);
-			}
-		}
+		} else {
+            // Process chunk char by char and escape required char
+            ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH);
+            for (int j = 0; j < sizeof(chunk); j++) {
+                char c = s[i + j];
+                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                    *output++ = c;
+                } else {
+                    output += simdjson_append_escape(output, c);
+                }
+            }
+            // Allocate enought space for rest of string
+            ZSTR_ALLOC(len - i);
+        }
 	}
 
-finish:
-	simdjson_smart_str_appendc_unsafe(buf, '"');
+    // Ensure that buf contains enoug space that we can call unsafe methods
+    ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
+
+    // Finish last chars of string
+    for (; i < len; i++) {
+		char c = s[i];
+		if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+			*output++ = c;
+		} else {
+			output += simdjson_append_escape(output, c);
+		}
+	}
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
 }
 #endif
 
@@ -509,9 +525,40 @@ TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, 
 }
 #endif
 
+static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
+    // For short strings allocate maximum possible string length, so we can write directly to output buffer
+    char *output = simdjson_smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2);
+
+    *output++ = '"';
+
+    size_t start = 0;
+    for (size_t pos = 0; pos < len; ++pos) {
+    	char c = s[pos];
+    	if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+    		continue;
+    	}
+
+        memcpy(output, s + start, pos - start);
+        output += pos - start;
+
+    	output += simdjson_append_escape(output, c);
+
+    	start = pos + 1;
+    }
+
+    if (start != len) {
+        memcpy(output, s + start, len - start);
+        output += len - start;
+    }
+
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+}
+
 zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder)
 {
-	size_t pos, len = ZSTR_LEN(str);
+	size_t len = ZSTR_LEN(str);
     const char *s = ZSTR_VAL(str);
 
 	if (len == 0) {
@@ -542,29 +589,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     }
 #endif
 
-    // For short strings allocate maximum possible string length, so we can use
-    // unsafe methods for string copying
-    simdjson_smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2);
-    simdjson_smart_str_appendc_unsafe(buf, '"');
-
-    size_t start = 0;
-    for (pos = 0; pos < len; ++pos) {
-    	char c = s[pos];
-    	if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-    		continue;
-    	}
-
-    	simdjson_smart_str_appendl_unsafe(buf, s + start, pos - start);
-    	simdjson_append_escape_char_unsafe(buf, c);
-
-    	start = pos + 1;
-    }
-
-    if (start != len) {
-    	simdjson_smart_str_appendl_unsafe(buf, s + start, len - start);
-    }
-
-    simdjson_smart_str_appendc_unsafe(buf, '"');
+    simdjson_escape_short_string(buf, s, len);
 
     return SUCCESS;
 }

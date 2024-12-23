@@ -4,19 +4,18 @@
 #include "php.h"
 #include "zend_smart_str.h"
 
-static zend_always_inline size_t simdjson_smart_str_alloc(smart_str *str, size_t len) {
+static zend_always_inline char* simdjson_smart_str_alloc(smart_str *str, size_t len) {
     ZEND_ASSERT(str->s != NULL);
     len += ZSTR_LEN(str->s);
     if (UNEXPECTED(len >= str->a)) {
         smart_str_erealloc(str, len);
     }
-    return len;
+    return ZSTR_VAL(str->s) + ZSTR_LEN(str->s);
 }
 
 static zend_always_inline char* simdjson_smart_str_extend(smart_str *dest, size_t len) {
-    size_t new_len = simdjson_smart_str_alloc(dest, len);
-    char *ret = ZSTR_VAL(dest->s) + ZSTR_LEN(dest->s);
-    ZSTR_LEN(dest->s) = new_len;
+    char *ret = simdjson_smart_str_alloc(dest, len);
+    ZSTR_LEN(dest->s) += len;
     return ret;
 }
 
