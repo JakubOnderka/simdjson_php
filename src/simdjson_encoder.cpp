@@ -447,25 +447,28 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 	return SUCCESS;
 }
 
-static zend_always_inline size_t simdjson_append_escape(char *buf, const char c) {
+static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
+{
 	auto append = simdjson_escape[c];
 	memcpy(buf, append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
 	return append.len;
 }
 
-#define ZSTR_ALLOC(_size) \
-      do { \
-          auto _new_len = _size + ZSTR_LEN(buf->s); \
-          if (UNEXPECTED(_new_len >= buf->a)) { \
-              ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s))); \
-              smart_str_erealloc(buf, _new_len); \
-              output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
-          } \
-      } while (0); \
-
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+
+#define SIDMJSON_ZSTR_ALLOC(_size) \
+    do { \
+        auto _new_len = _size + ZSTR_LEN(buf->s); \
+        if (UNEXPECTED(_new_len >= buf->a)) { \
+            ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s))); \
+            smart_str_erealloc(buf, _new_len); \
+            output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
+        } \
+    } while (0); \
+
 template<typename T>
-static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len)
+{
 	size_t i = 0;
     T chunk;
     char *output;
@@ -486,8 +489,9 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 			chunk.store((uint8_t*)output);
             output += sizeof(chunk);
 		} else {
+            // Allocate enought space for escaped chunk + space for rest of unescaped string
+            SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + (len - i));
             // Process chunk char by char and escape required char
-            ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH);
             for (int j = 0; j < sizeof(chunk); j++) {
                 char c = s[i + j];
                 if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
@@ -496,13 +500,11 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
                     output += simdjson_append_escape(output, c);
                 }
             }
-            // Allocate enought space for rest of string
-            ZSTR_ALLOC(len - i);
         }
 	}
 
     // Ensure that buf contains enoug space that we can call unsafe methods
-    ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
+    SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
 
     // Finish last chars of string
     for (; i < len; i++) {
@@ -520,14 +522,16 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 #endif
 
 #ifdef __SSE2__
-TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
+TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len)
+{
 	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
 }
 #endif
 
-static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
+static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len)
+{
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
-    char *output = simdjson_smart_str_alloc(buf, len * SIMDJSON_ENCODER_ESCAPE_LENGTH + 2);
+    char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
 
     *output++ = '"';
 
@@ -769,7 +773,8 @@ again:
 	return SUCCESS;
 }
 
-zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encoder) {
+zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encoder)
+{
 	ssize_t numbytes = php_stream_write(encoder->stream, ZSTR_VAL(buf->s), ZSTR_LEN(buf->s));
 	if (UNEXPECTED(numbytes < 0)) {
 		encoder->error_code = SIMDJSON_ERROR_STREAM_WRITE;
@@ -784,7 +789,8 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
     return SUCCESS;
 }
 
-const char* simdjson_encode_implementation() {
+const char* simdjson_encode_implementation()
+{
 #ifdef __SSE2__
       if (__builtin_cpu_supports("avx2")) {
           return "AVX2";
