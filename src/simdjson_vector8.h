@@ -9,7 +9,7 @@
 #define simdjson_vector8_eq _mm_cmpeq_epi8
 #define simdjson_vector8_or _mm_or_si128
 #define simdjson_vector8_has_le(_v1, _v2) _mm_cmpeq_epi8(_mm_max_epu8(_v1, _v2), _v2)
-#define simdjson_vector8_non_zero(_v) _mm_movemask_epi8(_v) != 0
+#define simdjson_vector8_to_bitmask(_v) _mm_movemask_epi8(_v)
 #endif
 
 // NEON
@@ -20,7 +20,7 @@
 #define simdjson_vector8_eq vceqq_u8
 #define simdjson_vector8_or vorrq_u8
 #define simdjson_vector8_has_le vcleq_u8
-#define simdjson_vector8_non_zero(_v) vmaxvq_u32(vreinterpretq_u32_u8(_v)) != 0
+#define simdjson_vector8_to_bitmask(_v) vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(_v), 4)), 0)
 #endif
 
 
@@ -47,14 +47,22 @@ struct simdjson_vector8 {
 #endif
     }
 
-    inline bool needs_escaping() {
+    inline uint64_t needs_escaping() {
         auto has_control = simdjson_vector8_has_le(chunk, simdjson_vector8_broadcast(0x1F));
         auto has_quote = simdjson_vector8_eq(chunk, simdjson_vector8_broadcast((unsigned char) '"'));
         auto has_backslash = simdjson_vector8_eq(chunk, simdjson_vector8_broadcast((unsigned char) '\\'));
 
         auto output = simdjson_vector8_or(has_control, has_quote);
         output = simdjson_vector8_or(output, has_backslash);
-        return simdjson_vector8_non_zero(output);
+        return simdjson_vector8_to_bitmask(output);
+    }
+
+    inline uint64_t escape_index(uint64_t mask) {
+#ifdef __SSE2__
+        return __builtin_ctzll(mask);
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        return __builtin_ctzll(mask) / 4;
+#endif
     }
 };
 

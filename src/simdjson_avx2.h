@@ -9,8 +9,8 @@
 #define simdjson_avx2_or _mm256_or_si256
 #define simdjson_avx2_eq _mm256_cmpeq_epi8
 #define simdjson_avx2_broadcast _mm256_set1_epi8
-#define simdjson_avx2_non_zero(_v) _mm256_movemask_epi8(_v) != 0
-#define simdjson_avx2_has_le(_v1, _v2) _mm256_cmpeq_epi8(_mm256_max_epu8(_v1, _v2), _v2);
+#define simdjson_avx2_has_le(_v1, _v2) _mm256_cmpeq_epi8(_mm256_max_epu8(_v1, _v2), _v2)
+#define simdjson_avx2_to_bitmask(_v) _mm256_movemask_epi8(_v)
 
 struct simdjson_avx2 {
     __m256i chunk;
@@ -23,14 +23,18 @@ struct simdjson_avx2 {
         _mm256_storeu_si256((__m256i*)s, chunk);
     }
 
-    TARGET_AVX2 inline bool needs_escaping() {
+    TARGET_AVX2 inline uint64_t needs_escaping() {
         auto has_control = simdjson_avx2_has_le(chunk, simdjson_avx2_broadcast(0x1F));
         auto has_quote = simdjson_avx2_eq(chunk, simdjson_avx2_broadcast((unsigned char) '"'));
         auto has_backslash = simdjson_avx2_eq(chunk, simdjson_avx2_broadcast((unsigned char) '\\'));
 
         auto output = simdjson_avx2_or(has_control, has_quote);
         output = simdjson_avx2_or(output, has_backslash);
-        return simdjson_avx2_non_zero(output);
+        return simdjson_avx2_to_bitmask(output);
+    }
+
+    TARGET_AVX2 inline uint64_t escape_index(uint64_t mask) {
+        return __builtin_ctzll(mask);
     }
 };
 
