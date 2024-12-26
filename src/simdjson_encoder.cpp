@@ -81,12 +81,14 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, s
 
 static inline void simdjson_append_double(smart_str *buf, double d)
 {
-	size_t len;
-	char num[PHP_DOUBLE_MAX_LENGTH];
-
-	php_gcvt(d, (int)PG(serialize_precision), '.', 'e', num);
-	len = strlen(num);
-	simdjson_smart_str_appendl(buf, num, len);
+    char *output = simdjson_smart_str_alloc(buf, 21);
+    char *end = simdjson::internal::to_chars(output, nullptr, d);
+    // HACK: simdjson to_chars method always add .0 at end of string. If output string contains '.0' at the end,
+    // remove it to use the same behaviour as PHP php_gcvt
+    if (*(end - 2) == '.' && *(end - 1) == '0') {
+        end -= 2;
+    }
+    ZSTR_LEN(buf->s) += end - output;
 }
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number)
