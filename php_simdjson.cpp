@@ -35,6 +35,7 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
 
 /* C++ header file for simdjson_php helper methods/classes */
 #include "src/simdjson_compatibility.h"
+#include "src/simdjson_smart_str.h"
 #include "src/simdjson_decoder_defs.h"
 #include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
@@ -335,7 +336,7 @@ PHP_FUNCTION(simdjson_encode) {
         smart_str_appendc(&buf, '\n');
     }
 
-    RETURN_STR(smart_str_extract(&buf));
+    RETURN_STR(simdjson_smart_str_extract(&buf));
 }
 
 PHP_FUNCTION(simdjson_encode_to_stream) {
@@ -367,13 +368,13 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
 
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
-    simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
+    if (simdjson_encode_zval(&buf, parameter, (int)options, &encoder) == SUCCESS) {
+        if (options & SIMDJSON_APPEND_NEWLINE) {
+            smart_str_appendc(&buf, '\n');
+        }
 
-    if (options & SIMDJSON_APPEND_NEWLINE) {
-        smart_str_appendc(&buf, '\n');
+        simdjson_encode_write_stream(&buf, &encoder); // write rest
     }
-
-    simdjson_encode_write_stream(&buf, &encoder); // write rest
     efree(buf.s);
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {

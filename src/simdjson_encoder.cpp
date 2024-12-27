@@ -803,7 +803,7 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
 		encoder->error_code = SIMDJSON_ERROR_STREAM_WRITE;
 		return FAILURE;
     }
-	ZSTR_LEN(buf->s) = 0; // clenaup buffer
+	ZSTR_LEN(buf->s) = 0; // cleanup buffer
     return SUCCESS;
 }
 

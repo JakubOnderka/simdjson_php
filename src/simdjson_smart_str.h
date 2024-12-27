@@ -38,4 +38,13 @@ static zend_always_inline void simdjson_smart_str_appendl(smart_str *dest, const
     simdjson_smart_str_appendl_unsafe(dest, str, len);
 }
 
+static zend_always_inline zend_string *simdjson_smart_str_extract(const smart_str *str) {
+    ZSTR_VAL(str->s)[ZSTR_LEN(str->s)] = '\0';
+    size_t free_space = str->a - ZSTR_LEN(str->s);
+    if (free_space > 1024) { // reallocate just when saving is bigger than 1024 bytes
+        return zend_string_realloc(str->s, ZSTR_LEN(str->s), 0);
+    }
+    return str->s;
+}
+
 #endif //SIMDJSON_SMART_STR_H
