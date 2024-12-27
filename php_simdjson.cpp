@@ -365,11 +365,6 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     encoder.max_depth = (int)depth;
     encoder.stream = stream;
 
-    if (options & SIMDJSON_LOCK_EX && php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_EX)) {
-        php_error_docref(NULL, E_WARNING, "Could not lock stream for writing");
-        RETURN_FALSE;
-    }
-
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
     simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
@@ -380,11 +375,6 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
 
     simdjson_encode_write_stream(&buf, &encoder); // write rest
     efree(buf.s);
-
-    if (options & SIMDJSON_LOCK_EX && php_stream_supports_lock(stream) && php_stream_lock(stream, LOCK_UN)) {
-        php_error_docref(NULL, E_WARNING, "Could not unlock stream");
-        RETURN_FALSE;
-    }
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
         zend_throw_exception(simdjson_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);

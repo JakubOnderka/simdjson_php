@@ -24,7 +24,6 @@ typedef enum {
 /* simdjson_encode() options */
 #define SIMDJSON_PRETTY_PRINT               (1<<7)
 #define SIMDJSON_APPEND_NEWLINE             (1<<12)
-#define SIMDJSON_LOCK_EX                    (1<<13)
 
 typedef struct _simdjson_encoder simdjson_encoder;
 

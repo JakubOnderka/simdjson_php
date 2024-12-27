@@ -12,11 +12,6 @@ const SIMDJSON_PRETTY_PRINT = UNKNOWN;
  * @cvalue SIMDJSON_APPEND_NEWLINE
  */
 const SIMDJSON_APPEND_NEWLINE = UNKNOWN;
-/**
- * @var int
- * @cvalue SIMDJSON_LOCK_EX
- */
-const SIMDJSON_LOCK_EX = UNKNOWN;
 
 /**
  * @var int
@@ -162,17 +157,11 @@ function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string
  *
   * @param mixed $value The value being encoded. Can be any type except a resource.
   * @param resource $res A file system pointer resource that is typically created using fopen().
-  * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT, SIMDJSON_APPEND_NEWLINE or SIMDJSON_LOCK_EX.
+  * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT or SIMDJSON_APPEND_NEWLINE.
   * @param int $depth Set the maximum depth. Must be greater than zero.
-  * @return string
+  * @return bool
  */
-function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, int $depth = 512) : bool {}
+function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, int $depth = 512) : true {}
 
-/**
- * This is used with php-src's build/gen_stubs.php to generate argument info compatible with php 7.0 and above.
- *
- * See README.md for function documentation.
- *
- */
 class SimdJsonException extends RuntimeException {
 }
