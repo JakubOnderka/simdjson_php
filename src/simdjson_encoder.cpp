@@ -531,6 +531,15 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 #endif
 
 #ifdef __SSE2__
+static zend_always_inline bool simdjson_avx2_supported()
+{
+#ifdef __AVX2__
+    return true;
+#endif
+
+    return __builtin_cpu_supports("avx2"); // check support in runtime
+}
+
 TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len)
 {
 	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
@@ -589,7 +598,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
 
 #ifdef __SSE2__
-   if (len >= sizeof(simdjson_avx2) && __builtin_cpu_supports("avx2")) {
+   if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
      	simdjson_escape_long_string_avx2(buf, s, len);
         return SUCCESS;
    }
@@ -801,7 +810,7 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
 const char* simdjson_encode_implementation()
 {
 #ifdef __SSE2__
-      if (__builtin_cpu_supports("avx2")) {
+      if (simdjson_avx2_supported()) {
           return "AVX2";
       } else {
           return "SSE2";
