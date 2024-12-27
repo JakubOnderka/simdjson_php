@@ -1,26 +1,8 @@
 {
-  "bootstrap": "benchmark/vendor/autoload.php",
-  "path": "benchmark/phpbench",
-  "retry_threshold": 4,
-  "reports": {
-    "table": {
-      "generator": "table",
-      "cols": [
-        "benchmark",
-        "subject",
-        "groups",
-        "mem_peak",
-        "mean",
-        "best",
-        "diff"
-      ],
-      "sort": {
-        "groups": "asc",
-        "mean": "asc"
-      }
+    "$schema":"./benchmark/vendor/phpbench/phpbench/phpbench.schema.json",
+    "runner.bootstrap": "benchmark/vendor/autoload.php",
+    "runner.path": "benchmark/phpbench",
+    "runner.php_config": {
+        "extension": ["modules/simdjson.so"]
     }
-  },
-  "php_config": {
-    "extension": [ "modules/simdjson.so" ]
-  }
 }
