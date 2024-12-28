@@ -68,6 +68,7 @@ $inputs =  array (
     $fp,
 
     // object variable
+    new stdClass(),
     $obj
 
 );
@@ -140,4 +141,6 @@ string(4) "null"
 -- Iteration 26 --
 bool(false)
 -- Iteration 27 --
+string(2) "{}"
+-- Iteration 28 --
 string(82) "{"MyInt":99,"MyFloat":123.45,"MyBool":true,"MyNull":null,"MyString":"Hello World"}"
