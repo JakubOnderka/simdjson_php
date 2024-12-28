@@ -50,21 +50,21 @@ static zend_always_inline bool simdjson_check_stack_limit(void)
 #endif
 }
 
-static inline void simdjson_pretty_print_colon(smart_str *buf, int options)
+static inline void simdjson_pretty_print_colon(smart_str *buf, simdjson_encoder *encoder)
 {
-	if (options & SIMDJSON_PRETTY_PRINT) {
+	if (encoder->options & SIMDJSON_PRETTY_PRINT) {
 		simdjson_smart_str_appendl(buf, ": ", 2);
 	} else {
 		simdjson_smart_str_appendc(buf, ':');
     }
 }
 
-static inline void simdjson_pretty_print_nl_ident(smart_str *buf, int options, simdjson_encoder *encoder)
+static inline void simdjson_pretty_print_nl_ident(smart_str *buf, simdjson_encoder *encoder)
 {
   	char *next;
 	const char *whitespace = "\n                                ";
 
-	if (options & SIMDJSON_PRETTY_PRINT) {
+	if (encoder->options & SIMDJSON_PRETTY_PRINT) {
 		next = simdjson_smart_str_extend(buf, 4 * encoder->depth + 1);
         if (EXPECTED(encoder->depth <= 8)) {
         	memcpy(next, whitespace, encoder->depth * 4 + 1);
@@ -113,7 +113,7 @@ static inline void simdjson_append_long(smart_str *buf, zend_long number)
 	} while (0)
 
 // Specific implementation for faster encoding packed arrays
-static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table, int options, simdjson_encoder *encoder)
+static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table, simdjson_encoder *encoder)
 {
   	zval* data;
 	zend_refcounted *recursion_rc = (zend_refcounted *)table;
@@ -131,8 +131,8 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 	++encoder->depth;
 
 	ZEND_HASH_PACKED_FOREACH_VAL(table, data) {
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
-		if (UNEXPECTED(simdjson_encode_zval(buf, data, options, encoder) == FAILURE)) {
+		simdjson_pretty_print_nl_ident(buf, encoder);
+		if (UNEXPECTED(simdjson_encode_zval(buf, data, encoder) == FAILURE)) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
         	return FAILURE;
         }
@@ -149,13 +149,13 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 	}
 	--encoder->depth;
 
-	simdjson_pretty_print_nl_ident(buf, options, encoder);
+	simdjson_pretty_print_nl_ident(buf, encoder);
 	simdjson_smart_str_appendc(buf, ']');
 
     return SUCCESS;
 }
 
-static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table, int options, simdjson_encoder *encoder)
+static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table, simdjson_encoder *encoder)
 {
 	int need_comma = 0;
 	zend_string *key;
@@ -182,7 +182,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 			need_comma = 1;
 		}
 
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
+		simdjson_pretty_print_nl_ident(buf, encoder);
 
 		if (EXPECTED(key)) {
 			if (UNEXPECTED(simdjson_escape_string(buf, key, encoder) == FAILURE)) {
@@ -195,9 +195,9 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 			simdjson_smart_str_appendc(buf, '"');
 		}
 
-		simdjson_pretty_print_colon(buf, options);
+		simdjson_pretty_print_colon(buf, encoder);
 
-		if (UNEXPECTED(simdjson_encode_zval(buf, data, options, encoder) == FAILURE)) {
+		if (UNEXPECTED(simdjson_encode_zval(buf, data, encoder) == FAILURE)) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 			return FAILURE;
 		}
@@ -213,14 +213,14 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
 	/* Only keep closing bracket on same line for empty arrays/objects */
 	if (need_comma) {
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
+		simdjson_pretty_print_nl_ident(buf, encoder);
 	}
 	simdjson_smart_str_appendc(buf, '}');
 
 	return SUCCESS;
 }
 
-static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
+static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simdjson_encoder *encoder)
 {
 	int need_comma = 0;
 
@@ -260,16 +260,16 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 			need_comma = 1;
 		}
 
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
+		simdjson_pretty_print_nl_ident(buf, encoder);
 
 		if (simdjson_escape_string(buf, prop_info->name, encoder) == FAILURE) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
 			return FAILURE;
 		}
 
-		simdjson_pretty_print_colon(buf, options);
+		simdjson_pretty_print_colon(buf, encoder);
 
-		if (simdjson_encode_zval(buf, prop, options, encoder) == FAILURE) {
+		if (simdjson_encode_zval(buf, prop, encoder) == FAILURE) {
 			SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
 			return FAILURE;
 		}
@@ -283,7 +283,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, int 
 	--encoder->depth;
 
 	if (need_comma) {
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
+		simdjson_pretty_print_nl_ident(buf, encoder);
 	}
 	simdjson_smart_str_appendc(buf, '}');
 	return SUCCESS;
@@ -301,7 +301,7 @@ static zend_always_inline bool simdjson_is_simple_object(zval *val)
         ;
 }
 
-static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
+static zend_result simdjson_encode_array(smart_str *buf, zval *val, simdjson_encoder *encoder)
 {
 	int need_comma = 0;
 	HashTable *myht;
@@ -320,14 +320,14 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 			return SUCCESS;
 		}
         if (zend_array_is_list(myht)) {
-        	return simdjson_encode_packed_array(buf, myht, options, encoder);
+        	return simdjson_encode_packed_array(buf, myht, encoder);
         } else {
-        	return simdjson_encode_mixed_array(buf, myht, options, encoder);
+        	return simdjson_encode_mixed_array(buf, myht, encoder);
         }
 	}
 
     if (simdjson_is_simple_object(val)) {
-		return simdjson_encode_simple_object(buf, val, options, encoder);
+		return simdjson_encode_simple_object(buf, val, encoder);
 	}
 
 	zend_object *obj = Z_OBJ_P(val);
@@ -396,7 +396,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 					need_comma = 1;
 				}
 
-				simdjson_pretty_print_nl_ident(buf, options, encoder);
+				simdjson_pretty_print_nl_ident(buf, encoder);
 
 				if (simdjson_escape_string(buf, key, encoder) == FAILURE) {
 					SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
@@ -410,16 +410,16 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 					need_comma = 1;
 				}
 
-				simdjson_pretty_print_nl_ident(buf, options, encoder);
+				simdjson_pretty_print_nl_ident(buf, encoder);
 
 				simdjson_smart_str_appendc(buf, '"');
 				simdjson_append_long(buf, (zend_long) index);
 				simdjson_smart_str_appendc(buf, '"');
 			}
 
-			simdjson_pretty_print_colon(buf, options);
+			simdjson_pretty_print_colon(buf, encoder);
 
-			if (simdjson_encode_zval(buf, data, options, encoder) == FAILURE) {
+			if (simdjson_encode_zval(buf, data, encoder) == FAILURE) {
 				SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 				zend_release_properties(myht);
 				zval_ptr_dtor(&tmp);
@@ -440,7 +440,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, int options,
 
 	/* Only keep closing bracket on same line for empty arrays/objects */
 	if (need_comma) {
-		simdjson_pretty_print_nl_ident(buf, options, encoder);
+		simdjson_pretty_print_nl_ident(buf, encoder);
 	}
 
 	simdjson_smart_str_appendc(buf, '}');
@@ -616,7 +616,7 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     return SUCCESS;
 }
 
-static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, int options, simdjson_encoder *encoder) /* {{{ */
+static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, simdjson_encoder *encoder) /* {{{ */
 {
 	zend_class_entry *ce = Z_OBJCE_P(val);
 	zval retval, fname;
@@ -679,10 +679,10 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 #else
 		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
 #endif
-		return_code = simdjson_encode_array(buf, &retval, options, encoder);
+		return_code = simdjson_encode_array(buf, &retval, encoder);
 	} else {
 		/* All other types, encode as normal */
-		return_code = simdjson_encode_zval(buf, &retval, options, encoder);
+		return_code = simdjson_encode_zval(buf, &retval, encoder);
 #if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
 #else
@@ -705,7 +705,7 @@ static zend_always_inline zval *simdjson_zend_enum_fetch_case_value(zend_object 
 	return OBJ_PROP_NUM(zobj, 1);
 }
 
-static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
+static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, simdjson_encoder *encoder)
 {
 	zend_class_entry *ce = Z_OBJCE_P(val);
 	if (ce->enum_backing_type == IS_UNDEF) {
@@ -714,11 +714,11 @@ static zend_result simdjson_encode_serializable_enum(smart_str *buf, zval *val, 
 	}
 
 	zval *value_zv = simdjson_zend_enum_fetch_case_value(Z_OBJ_P(val));
-	return simdjson_encode_zval(buf, value_zv, options, encoder);
+	return simdjson_encode_zval(buf, value_zv, encoder);
 }
 #endif
 
-zend_result simdjson_encode_zval(smart_str *buf, zval *val, int options, simdjson_encoder *encoder)
+zend_result simdjson_encode_zval(smart_str *buf, zval *val, simdjson_encoder *encoder)
 {
     // For simdjson_encode_to_stream method, write data to stream if buffer is larger than 64 kilobytes
     if (UNEXPECTED(encoder->stream != NULL && ZSTR_LEN(buf->s) >= 64 * 1024)) {
@@ -759,11 +759,11 @@ again:
 
 		case IS_OBJECT:
 			if (instanceof_function(Z_OBJCE_P(val), php_json_serializable_ce)) {
-				return simdjson_encode_serializable_object(buf, val, options, encoder);
+				return simdjson_encode_serializable_object(buf, val, encoder);
 			}
 #if PHP_VERSION_ID >= 80100
 			if (Z_OBJCE_P(val)->ce_flags & ZEND_ACC_ENUM) {
-				return simdjson_encode_serializable_enum(buf, val, options, encoder);
+				return simdjson_encode_serializable_enum(buf, val, encoder);
 			}
 #endif
 			/* fallthrough -- Non-serializable object */
@@ -774,7 +774,7 @@ again:
 			zval zv;
 			zend_result res;
 			ZVAL_COPY(&zv, val);
-			res = simdjson_encode_array(buf, &zv, options, encoder);
+			res = simdjson_encode_array(buf, &zv, encoder);
 			zval_ptr_dtor_nogc(&zv);
 			return res;
 		}

@@ -382,9 +382,10 @@ PHP_FUNCTION(simdjson_encode) {
 #endif
 
     encoder.max_depth = (int)depth;
+    encoder.options = (int)options;
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
-    simdjson_encode_zval(&buf, parameter, (int)options, &encoder);
+    simdjson_encode_zval(&buf, parameter, &encoder);
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
         efree(buf.s);
@@ -424,11 +425,12 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     }
 
     encoder.max_depth = (int)depth;
+    encoder.options = (int)options;
     encoder.stream = stream;
 
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
-    if (simdjson_encode_zval(&buf, parameter, (int)options, &encoder) == SUCCESS) {
+    if (simdjson_encode_zval(&buf, parameter, &encoder) == SUCCESS) {
         if (options & SIMDJSON_APPEND_NEWLINE) {
             simdjson_smart_str_appendc(&buf, '\n');
         }
