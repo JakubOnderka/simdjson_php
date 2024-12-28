@@ -157,7 +157,7 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
 }
 
 #if PHP_VERSION_ID >= 80200
-// Exact copy of PHP method zend_hash_str_find_bucket that is not exported
+// Copy of PHP method zend_hash_str_find_bucket that is not exported without checking if p->key is not null
 static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h)
 {
 	uint32_t nIndex;
@@ -170,9 +170,7 @@ static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashT
 	while (idx != HT_INVALID_IDX) {
 		ZEND_ASSERT(idx < HT_IDX_TO_HASH(ht->nTableSize));
 		p = HT_HASH_TO_BUCKET_EX(arData, idx);
-		if ((p->h == h)
-			 && p->key
-			 && zend_string_equals_cstr(p->key, str, len)) {
+		if (p->h == h && zend_string_equals_cstr(p->key, str, len)) {
 			return p;
 		}
 		idx = Z_NEXT(p->val);
