@@ -314,7 +314,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
     zend_symtable_update(ht, key, value);
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
-#endif
+#endif // PHP_VERSION_ID >= 80200
 }
 
 static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, const int64_t value) {
@@ -411,7 +411,7 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
 
 /* }}} */
 
-static simdjson_php_error_code simdjson_create_object(simdjson::dom::element element, zval *return_value) /* {{{ */ {
+static simdjson_php_error_code simdjson_create_object(simdjson::dom::element element, zval *return_value, HashTable *repeated_key_strings) /* {{{ */ {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -445,7 +445,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
 
             for (simdjson::dom::element child : json_array) {
                 zval value;
-                simdjson_php_error_code error = simdjson_create_object(child, &value);
+                simdjson_php_error_code error = simdjson_create_object(child, &value, repeated_key_strings);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
@@ -458,6 +458,10 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
         case simdjson::dom::element_type::OBJECT : {
             const auto json_object = element.get_object().value_unsafe();
             zend_object *obj = simdjson_init_object(return_value, json_object.size());
+#if PHP_VERSION_ID >= 80200
+            // Allocate table for reusing already allocated keys
+            simdjson_init_reused_key_strings(repeated_key_strings);
+#endif
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
@@ -469,7 +473,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                     return SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY;
                 }
                 zval value;
-                simdjson_php_error_code error = simdjson_create_object(field.value, &value);
+                simdjson_php_error_code error = simdjson_create_object(field.value, &value, repeated_key_strings);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
@@ -481,14 +485,19 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                 if (size <= 1) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
+#if PHP_VERSION_ID >= 80200
+                    zend_ulong h = zend_inline_hash_func(data, size);
+                    key = simdjson_reuse_key(repeated_key_strings, data, size, h);
+#else
                     key = simdjson_string_init(data, size);
+#endif
                 }
                 zend_std_write_property(obj, key, &value, NULL);
                 zend_string_release_ex(key, 0);
 
                 /* After the key is added to the object (incrementing the reference count) ,
                  * decrement the reference count of the value by one */
-                zval_ptr_dtor_nogc(&value);
+                Z_REFCOUNTED(value) && Z_DELREF(value);
             }
             break;
         }
@@ -509,18 +518,20 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
 }
 
 static zend_always_inline simdjson_php_error_code simdjson_convert_element(simdjson::dom::element element, zval *return_value, bool associative, HashTable *repeated_key_strings)  {
+    simdjson_php_error_code resp;
     if (associative) {
         simdjson_create_array(element, return_value, repeated_key_strings);
-#if PHP_VERSION_ID >= 80200
-        // Cleanup table if array was initialized
-        if (repeated_key_strings->nTableSize != 0) {
-        	simdjson_clean_reused_key_strings(repeated_key_strings);
-        }
-#endif
-        return simdjson::SUCCESS;;
+        resp = simdjson::SUCCESS;
+    } else {
+        resp = simdjson_create_object(element, return_value, repeated_key_strings);
     }
-
-    return simdjson_create_object(element, return_value);
+#if PHP_VERSION_ID >= 80200
+    // Cleanup table if repeated_key_strings hashtable was initialized
+    if (repeated_key_strings->nTableSize != 0) {
+        simdjson_clean_reused_key_strings(repeated_key_strings);
+    }
+#endif
+    return resp;
 }
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) /* {{{ */ {

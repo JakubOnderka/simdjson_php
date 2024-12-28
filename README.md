@@ -20,6 +20,8 @@
 | Encode pretty print | 0.83 ms  | 0.31 ms      | **2.6x** |
 | Validate            | 1.37 ms  | 0.22 ms      | **6.2x** |
 
+Memory usage is reduced when decoding JSON compared to `json_decode()`, as array keys are deduplicated. When decoding [`twitter.json`](jsonexamples/twitter.json), memory usage decrees from 3.01 MB to 2.47 MB.
+
 ## Requirement
 
 - PHP 8.0+ (PHP 8.2+ recommended for maximum performance)
