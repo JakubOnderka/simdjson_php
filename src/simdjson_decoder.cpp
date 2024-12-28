@@ -482,7 +482,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
 
                 /* Add the key to the object */
                 zend_string *key;
-                if (size <= 1) {
+                if (UNEXPECTED(size <= 1)) {
                     key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
                 } else {
 #if PHP_VERSION_ID >= 80200
@@ -492,12 +492,9 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                     key = simdjson_string_init(data, size);
 #endif
                 }
-                zend_std_write_property(obj, key, &value, NULL);
-                zend_string_release_ex(key, 0);
 
-                /* After the key is added to the object (incrementing the reference count) ,
-                 * decrement the reference count of the value by one */
-                Z_REFCOUNTED(value) && Z_DELREF(value);
+                zend_hash_update(zend_std_get_properties(obj), key, &value);
+                zend_string_release_ex(key, 0);
             }
             break;
         }
