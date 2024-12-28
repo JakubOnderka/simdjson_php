@@ -542,34 +542,34 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
 
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), true, depth));
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
     return simdjson_convert_element(doc, return_value, associative, &parser->repeated_key_strings);
 }
 /* }}} */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, bool associative,
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, bool associative,
                               size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
     simdjson::dom::element element;
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
     SIMDJSON_PHP_TRY(get_key_with_optional_prefix(doc, key).get(element));
     return simdjson_convert_element(element, return_value, associative, &parser->repeated_key_strings);
 }
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_parser* parser, const char *json, size_t len, const char *key, size_t depth) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_parser* parser, const zend_string *json, const char *key, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
     return get_key_with_optional_prefix(doc, key).error();
 }
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable) /* {{{ */ {
     simdjson::dom::element doc;
     simdjson::dom::element element;
 
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, true, depth));
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
 
     SIMDJSON_PHP_TRY(get_key_with_optional_prefix(doc, key).get(element));
 

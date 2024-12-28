@@ -176,7 +176,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_
  *
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(struct simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, bool associative, size_t depth);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(struct simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, bool associative, size_t depth);
 /**
  * Checks if the json pointer 'key' exists in the given json string.
  *
@@ -188,7 +188,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(struct simdjson_
  *
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
-PHP_SIMDJSON_API uint8_t php_simdjson_key_exists(struct simdjson_php_parser* parser, const char *json, size_t len, const char *key, size_t depth);
+PHP_SIMDJSON_API uint8_t php_simdjson_key_exists(struct simdjson_php_parser* parser, const zend_string *json, const char *key, size_t depth);
 /**
  * Count the keys of the given array/object at json pointer 'key' exists in the given json string.
  *
@@ -199,7 +199,7 @@ PHP_SIMDJSON_API uint8_t php_simdjson_key_exists(struct simdjson_php_parser* par
  *
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(struct simdjson_php_parser* parser, const char *json, size_t len, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(struct simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable);
 
 END_EXTERN_C()
 
