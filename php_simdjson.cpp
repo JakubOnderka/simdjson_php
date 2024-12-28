@@ -164,9 +164,15 @@ PHP_FUNCTION(simdjson_key_value) {
     zend_string *key = NULL;
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|bl", &json, &key, &associative, &depth) == FAILURE) {
-        RETURN_THROWS();
-    }
+
+    ZEND_PARSE_PARAMETERS_START(2, 4)
+        Z_PARAM_STR(json)
+        Z_PARAM_STR(key)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(associative)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
     if (!simdjson_validate_depth(depth, 4)) {
         RETURN_THROWS();
     }
@@ -183,9 +189,15 @@ PHP_FUNCTION(simdjson_key_count) {
     zend_string *key = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
     bool throw_if_uncountable = false;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|lb", &json, &key, &depth, &throw_if_uncountable) == FAILURE) {
-        RETURN_THROWS();
-    }
+
+    ZEND_PARSE_PARAMETERS_START(2, 4)
+        Z_PARAM_STR(json)
+        Z_PARAM_STR(key)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(depth)
+        Z_PARAM_BOOL(throw_if_uncountable)
+    ZEND_PARSE_PARAMETERS_END();
+
     if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
@@ -204,9 +216,14 @@ PHP_FUNCTION(simdjson_key_exists) {
     zend_string *json = NULL;
     zend_string *key = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
-    if (zend_parse_parameters(ZEND_NUM_ARGS(), "SS|l", &json, &key, &depth) == FAILURE) {
-        RETURN_THROWS();
-    }
+
+    ZEND_PARSE_PARAMETERS_START(2, 3)
+        Z_PARAM_STR(json)
+        Z_PARAM_STR(key)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
     if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
