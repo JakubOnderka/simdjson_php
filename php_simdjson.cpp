@@ -43,6 +43,8 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
 
 #include "simdjson_arginfo.h"
 
+static zend_string *simdjson_json_empty_array;
+
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
 #define SIMDJSON_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(simdjson, v)
@@ -303,6 +305,41 @@ static zend_always_inline bool simdjson_validate_encode_depth(const zend_long de
     return true;
 }
 
+#if PHP_VERSION_ID >= 80200
+/** For simple types we can just return direct interned string without allocating new strings */
+static zend_always_inline bool simdjson_encode_simple(const zval *parameter, zval *return_value, zend_long options) {
+    switch (Z_TYPE_P(parameter)) {
+        case IS_NULL:
+            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_NULL_LOWERCASE));
+            return true;
+
+        case IS_TRUE:
+            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_TRUE));
+            return true;
+
+        case IS_FALSE:
+            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_FALSE));
+            return true;
+
+        case IS_LONG:
+            if (Z_LVAL_P(parameter) >= 0 && Z_LVAL_P(parameter) < 10) {
+                RETVAL_STR(ZSTR_CHAR((unsigned char) '0' + Z_LVAL_P(parameter)));
+                return true;
+            }
+            break;
+
+        case IS_ARRAY:
+            if (zend_hash_num_elements(Z_ARRVAL_P(parameter)) == 0) {
+                RETVAL_STR(simdjson_json_empty_array);
+                return true;
+            }
+            break;
+    }
+
+    return false;
+}
+#endif // PHP_VERSION_ID >= 80200
+
 PHP_FUNCTION(simdjson_encode) {
     zval *parameter;
     simdjson_encoder encoder = {0};
@@ -321,6 +358,12 @@ PHP_FUNCTION(simdjson_encode) {
         RETURN_THROWS();
     }
 
+#if PHP_VERSION_ID >= 80200
+    if (!(options & SIMDJSON_APPEND_NEWLINE) && simdjson_encode_simple(parameter, return_value, options)) {
+        return;
+    }
+#endif
+
     encoder.max_depth = (int)depth;
     // Allocate output buffer to smallest size, so we remove checks if buffer was allocated in simdjson_encode_zval method
     smart_str_erealloc(&buf, 200);
@@ -333,7 +376,7 @@ PHP_FUNCTION(simdjson_encode) {
     }
 
     if (options & SIMDJSON_APPEND_NEWLINE) {
-        smart_str_appendc(&buf, '\n');
+        simdjson_smart_str_appendc(&buf, '\n');
     }
 
     RETURN_STR(simdjson_smart_str_extract(&buf));
@@ -370,7 +413,7 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     smart_str_erealloc(&buf, 200);
     if (simdjson_encode_zval(&buf, parameter, (int)options, &encoder) == SUCCESS) {
         if (options & SIMDJSON_APPEND_NEWLINE) {
-            smart_str_appendc(&buf, '\n');
+            simdjson_smart_str_appendc(&buf, '\n');
         }
 
         simdjson_encode_write_stream(&buf, &encoder); // write rest
@@ -396,43 +439,14 @@ ZEND_TSRMLS_CACHE_UPDATE();
 
 /** {{{ PHP_MINIT_FUNCTION
 */
-#define SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(errcode) REGISTER_LONG_CONSTANT("SIMDJSON_ERR_" #errcode, simdjson::errcode, CONST_PERSISTENT | CONST_CS)
-#define SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(errcode, val) REGISTER_LONG_CONSTANT("SIMDJSON_ERR_" #errcode, (val), CONST_PERSISTENT | CONST_CS)
 PHP_MINIT_FUNCTION (simdjson) {
-	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
+#if PHP_VERSION_ID >= 80200
+    // Interned string for empty array
+    simdjson_json_empty_array = zend_new_interned_string(zend_string_init("[]", 2, 1));
+    GC_ADD_FLAGS(simdjson_json_empty_array, IS_STR_VALID_UTF8);
+#endif
 
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(CAPACITY);                   ///< This parser can't support a document that big
-    // SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(MEMALLOC);                   ///< Error allocating memory, most likely out of memory
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(TAPE_ERROR);                 ///< Something went wrong, this is a generic error
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(DEPTH_ERROR);                ///< Your document exceeds the user-specified depth limitation
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(STRING_ERROR);               ///< Problem while parsing a string
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(T_ATOM_ERROR);               ///< Problem while parsing an atom starting with the letter 't'
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(F_ATOM_ERROR);               ///< Problem while parsing an atom starting with the letter 'f'
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(N_ATOM_ERROR);               ///< Problem while parsing an atom starting with the letter 'n'
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(NUMBER_ERROR);               ///< Problem while parsing a number
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UTF8_ERROR);                 ///< the input is not valid UTF-8
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UNINITIALIZED);              ///< unknown error, or uninitialized document
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(EMPTY);                      ///< no structural element found
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UNESCAPED_CHARS);            ///< found unescaped characters in a string.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UNCLOSED_STRING);            ///< missing quote at the end
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UNSUPPORTED_ARCHITECTURE);   ///< unsupported architecture
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INCORRECT_TYPE);             ///< JSON element has a different type than user expected
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(NUMBER_OUT_OF_RANGE);        ///< JSON number does not fit in 64 bits
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INDEX_OUT_OF_BOUNDS);        ///< JSON array index too large
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(NO_SUCH_FIELD);              ///< JSON field not found in object
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(IO_ERROR);                   ///< Error reading a file
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INVALID_JSON_POINTER);       ///< Invalid JSON pointer reference
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INVALID_URI_FRAGMENT);       ///< Invalid URI fragment
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(UNEXPECTED_ERROR);           ///< indicative of a bug in simdjson
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(PARSER_IN_USE);              ///< parser is already in use.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(OUT_OF_ORDER_ITERATION);     ///< tried to iterate an array or object out of order
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INSUFFICIENT_PADDING);       ///< The JSON doesn't have enough padding for simdjson to safely parse it.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(INCOMPLETE_ARRAY_OR_OBJECT); ///< The document ends early.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(SCALAR_DOCUMENT_AS_VALUE);   ///< A scalar document is treated as a value.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(OUT_OF_BOUNDS);              ///< Attempted to access location outside of document.
-    SIMDJSON_REGISTER_ERROR_CODE_CONSTANT(TRAILING_CONTENT);           ///< Unexpected trailing content in the JSON input
-    SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(KEY_COUNT_NOT_COUNTABLE, SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE); ///< JSON pointer refers to a value that cannot be counted
-    SIMDJSON_REGISTER_CUSTOM_ERROR_CODE_CONSTANT(INVALID_PROPERTY, SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY); ///< Invalid property name
+	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
 
     register_simdjson_symbols(0);
 

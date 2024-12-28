@@ -13,6 +13,7 @@ const SIMDJSON_PRETTY_PRINT = UNKNOWN;
  */
 const SIMDJSON_APPEND_NEWLINE = UNKNOWN;
 
+// Encoder errors
 /**
  * @var int
  * @cvalue SIMDJSON_ERROR_NONE
@@ -53,6 +54,163 @@ const SIMDJSON_ERROR_INVALID_PROPERTY_NAME = UNKNOWN;
  * @cvalue SIMDJSON_ERROR_NON_BACKED_ENUM
  */
 const SIMDJSON_ERROR_NON_BACKED_ENUM = UNKNOWN;
+
+// Decoder errors
+/**
+ * @var int
+ * @cvalue simdjson::CAPACITY
+ */
+const SIMDJSON_ERR_CAPACITY = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::TAPE_ERROR
+ */
+const SIMDJSON_ERR_TAPE_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::DEPTH_ERROR
+ */
+const SIMDJSON_ERR_DEPTH_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::STRING_ERROR
+ */
+const SIMDJSON_ERR_STRING_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::T_ATOM_ERROR
+ */
+const SIMDJSON_ERR_T_ATOM_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::F_ATOM_ERROR
+ */
+const SIMDJSON_ERR_F_ATOM_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::N_ATOM_ERROR
+ */
+const SIMDJSON_ERR_N_ATOM_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::NUMBER_ERROR
+ */
+const SIMDJSON_ERR_NUMBER_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UTF8_ERROR
+ */
+const SIMDJSON_ERR_UTF8_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UNINITIALIZED
+ */
+const SIMDJSON_ERR_UNINITIALIZED = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::EMPTY
+ */
+const SIMDJSON_ERR_EMPTY = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UNESCAPED_CHARS
+ */
+const SIMDJSON_ERR_UNESCAPED_CHARS = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UNCLOSED_STRING
+ */
+const SIMDJSON_ERR_UNCLOSED_STRING = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UNSUPPORTED_ARCHITECTURE
+ */
+const SIMDJSON_ERR_UNSUPPORTED_ARCHITECTURE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INCORRECT_TYPE
+ */
+const SIMDJSON_ERR_INCORRECT_TYPE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::NUMBER_OUT_OF_RANGE
+ */
+const SIMDJSON_ERR_NUMBER_OUT_OF_RANGE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INDEX_OUT_OF_BOUNDS
+ */
+const SIMDJSON_ERR_INDEX_OUT_OF_BOUNDS = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::NO_SUCH_FIELD
+ */
+const SIMDJSON_ERR_NO_SUCH_FIELD = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::IO_ERROR
+ */
+const SIMDJSON_ERR_IO_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INVALID_JSON_POINTER
+ */
+const SIMDJSON_ERR_INVALID_JSON_POINTER = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INVALID_URI_FRAGMENT
+ */
+const SIMDJSON_ERR_INVALID_URI_FRAGMENT = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::UNEXPECTED_ERROR
+ */
+const SIMDJSON_ERR_UNEXPECTED_ERROR = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::PARSER_IN_USE
+ */
+const SIMDJSON_ERR_PARSER_IN_USE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::OUT_OF_ORDER_ITERATION
+ */
+const SIMDJSON_ERR_OUT_OF_ORDER_ITERATION = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INSUFFICIENT_PADDING
+ */
+const SIMDJSON_ERR_INSUFFICIENT_PADDING = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::INCOMPLETE_ARRAY_OR_OBJECT
+ */
+const SIMDJSON_ERR_INCOMPLETE_ARRAY_OR_OBJECT = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::SCALAR_DOCUMENT_AS_VALUE
+ */
+const SIMDJSON_ERR_SCALAR_DOCUMENT_AS_VALUE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::OUT_OF_BOUNDS
+ */
+const SIMDJSON_ERR_OUT_OF_BOUNDS = UNKNOWN;
+/**
+ * @var int
+ * @cvalue simdjson::TRAILING_CONTENT
+ */
+const SIMDJSON_ERR_TRAILING_CONTENT = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE
+ */
+const SIMDJSON_ERR_KEY_COUNT_NOT_COUNTABLE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY
+ */
+const SIMDJSON_ERR_INVALID_PROPERTY = UNKNOWN;
 
 function simdjson_validate(string $json, int $depth = 512): bool {}
 
