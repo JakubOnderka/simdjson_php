@@ -57,6 +57,21 @@ get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_
     return doc.at_pointer(std_pointer);
 }
 
+static zend_always_inline zend_object* simdjson_init_object(zval *zv, uint32_t size) {
+#if PHP_VERSION_ID >= 80300
+    zend_object *object = (zend_object*)emalloc(sizeof(zend_object) + zend_object_properties_size(zend_standard_class_def));
+    zend_object_std_init(object, zend_standard_class_def);
+    // Initialize properties array to expected size
+    object->properties = zend_new_array(size);
+    zend_hash_real_init_mixed(object->properties);
+    ZVAL_OBJ(zv, object);
+    return object;
+#else
+    object_init(zv);
+    return Z_OBJ_P(zv);
+#endif
+}
+
 /** Init packed array with expected size */
 static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint32_t size) {
     zend_array *arr;
@@ -442,8 +457,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
         }
         case simdjson::dom::element_type::OBJECT : {
             const auto json_object = element.get_object().value_unsafe();
-            object_init(return_value);
-            zend_object *obj = Z_OBJ_P(return_value);
+            zend_object *obj = simdjson_init_object(return_value, json_object.size());
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
