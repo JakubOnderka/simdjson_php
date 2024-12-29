@@ -8,19 +8,20 @@
 
 ## How fast is simdjson_php?
 
-* Decoding is 3x faster compared to PHP's `json_decode()`
-* Encoding is 2.5x faster compared to PHP's `json_encode()`
-* Validation is 6x faster compared to PHP's `json_validate()`
+* Decoding is 3× faster compared to PHP's `json_decode()`
+* Encoding is 2.5× faster compared to PHP's `json_encode()`
+* Validation is 6× faster compared to PHP's `json_validate()`
 
 | Method              | Original | simdjson_php | Speedup  |
 |---------------------|----------|--------------|----------| 
-| Decode to array     | 1.48 ms  | 0.51 ms      | **2.9x** |
-| Decode to object    | 1.59 ms  | 0.71 ms      | **2.2x** |
-| Encode              | 0.67 ms  | 0.26 ms      | **2.5x** |
-| Encode pretty print | 0.83 ms  | 0.31 ms      | **2.6x** |
-| Validate            | 1.37 ms  | 0.22 ms      | **6.2x** |
+| Decode to array     | 1.48 ms  | 0.49 ms      | **3.0×** |
+| Decode to object    | 1.59 ms  | 0.69 ms      | **2.3×** |
+| Encode              | 0.67 ms  | 0.26 ms      | **2.5×** |
+| Encode pretty print | 0.83 ms  | 0.31 ms      | **2.6×** |
+| Validate            | 1.37 ms  | 0.22 ms      | **6.2×** |
 
-Memory usage is reduced when decoding JSON compared to `json_decode()`, as array keys are deduplicated. When decoding [`twitter.json`](jsonexamples/twitter.json), memory usage decrees from 3.01 MB to 2.47 MB.
+Using PHP 8.3 on [Apple M1 Max](https://en.wikipedia.org/wiki/Apple_M1#M1_Pro_and_M1_Max), for test specification see `TwitterDecodeBench.php` and `TwitterEncoderBench.php`.
+Memory usage is also reduced when decoding JSON compared to `json_decode()`, as array keys are deduplicated. When decoding [`twitter.json`](jsonexamples/twitter.json), memory usage decrees from 3.01 MB to 2.47 MB.
 
 ## Requirement
 
@@ -107,14 +108,18 @@ var_dump($res) //int(5)
 
 ## Encoder
 
-Most of available options of default `json_encode()` method are not supported by `simdjson_encode()` as they are usually useless. The only supported option from `json_encode()` is `SIMDJSON_PRETTY_PRINT`.
+Most of available options of default `json_encode()` method are not supported by `simdjson_encode()` as they are usually useless.
 
 `simdjson_encode($value)` method has very similar behaviour as `json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)`
 
+Supported options are:
+* `SIMDJSON_PRETTY_PRINT` - use whitespace in returned data to format it.
+* `SIMDJSON_INVALID_UTF8_SUBSTITUTE` - convert invalid UTF-8 characters to `\0xfffd` (Unicode Character 'REPLACEMENT CHARACTER' �)
+* `SIMDJSON_APPEND_NEWLINE` - append new line character (`\n`) to end of encoded string. This is useful when encoding multiple objects to JSONL format as PHP strigns are immutable.
+
 Differences are:
-* uses different algorithm to convert floating-point number to string
+* uses different algorithm to convert floating-point number to string, so string format can be slightly different
 * even when `JSON_UNESCAPED_UNICODE` is enabled, PHP `json_encode()` escapes some Unicode chars that do not need to be escaped. `simdjson_encode()` escape just Unicode chars that needs to be escaped by JSON spec.
-* new option `SIMDJSON_APPEND_NEWLINE` will append new line character (`\n`) to end of encoded string
 * `simdjson_encode_to_stream()` method allows you to write encoded string directly to PHP stream
 
 ## Decoder edge cases

@@ -50,7 +50,7 @@ static zend_always_inline bool simdjson_check_stack_limit(void)
 #endif
 }
 
-static inline void simdjson_pretty_print_colon(smart_str *buf, simdjson_encoder *encoder)
+static inline void simdjson_pretty_print_colon(smart_str *buf, const simdjson_encoder *encoder)
 {
 	if (encoder->options & SIMDJSON_PRETTY_PRINT) {
 		simdjson_smart_str_appendl(buf, ": ", 2);
@@ -59,7 +59,7 @@ static inline void simdjson_pretty_print_colon(smart_str *buf, simdjson_encoder 
     }
 }
 
-static inline void simdjson_pretty_print_nl_ident(smart_str *buf, simdjson_encoder *encoder)
+static inline void simdjson_pretty_print_nl_ident(smart_str *buf, const simdjson_encoder *encoder)
 {
   	char *next;
 	const char *whitespace = "\n                                ";
@@ -456,8 +456,6 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
 	return append.len;
 }
 
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
-
 #define SIDMJSON_ZSTR_ALLOC(_size) \
     do { \
         auto _new_len = _size + ZSTR_LEN(buf->s); \
@@ -468,6 +466,7 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
         } \
     } while (0); \
 
+#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 template<typename T>
 static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len)
 {
@@ -550,7 +549,6 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
 {
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
     char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
-
     *output++ = '"';
 
     size_t start = 0;
@@ -578,6 +576,85 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
     ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
 }
 
+// Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+// See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details.
+static zend_always_inline uint32_t simdjson_unicode_decode(uint32_t* state, uint32_t* codep, uint32_t byte)
+{
+    uint32_t type = simdjson_utf8d[byte];
+
+    *codep = (*state != SIMDJSON_UTF8_ACCEPT) ?
+        (byte & 0x3fu) | (*codep << 6) :
+        (0xff >> type) & (byte);
+
+    *state = simdjson_utf8d[256 + *state*16 + type];
+    return *state;
+}
+
+static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len)
+{
+    uint32_t codepoint = 0, prev = 0, current = 0, skip = 0;
+    const char* start = NULL;
+    const char* c = s;
+    char* output;
+    size_t valid_len = 0;
+
+    output = simdjson_smart_str_alloc(buf, len + 2);
+    *output++ = '"';
+
+    for (; c < s + len; prev = current, ++c) {
+        unsigned char current_char = (unsigned char)*c;
+        switch (simdjson_unicode_decode(&current, &codepoint, current_char)) {
+            case SIMDJSON_UTF8_ACCEPT:
+                if (start == NULL) {
+                    start = c;
+                }
+                if (EXPECTED(simdjson_need_escaping[current_char] == 0)) {
+                    valid_len++;
+                } else {
+                    // Append valid chars
+                    SIDMJSON_ZSTR_ALLOC(valid_len + 8);
+                    memcpy(output, start, valid_len);
+                    output += valid_len;
+                    // Append escaped char
+                    output += simdjson_append_escape(output, *c);
+                    // Start again from next char
+                    valid_len = 0;
+                    start = c + 1;
+                }
+                break;
+
+            case SIMDJSON_UTF8_REJECT:
+                // Append valid chars and UTF-8 replace char �
+                SIDMJSON_ZSTR_ALLOC(valid_len + 3);
+                memcpy(output, start, valid_len);
+                output += valid_len;
+                memcpy(output, "\xef\xbf\xbd", 3);
+                output += 3;
+                // Reset vars
+                start = NULL;
+                c += skip;
+                skip = 0;
+                valid_len = 0;
+                current = SIMDJSON_UTF8_ACCEPT;
+                if (prev != SIMDJSON_UTF8_ACCEPT) {
+                    c--;
+                }
+                break;
+
+            default:
+                skip = current / 3;
+                break;
+        }
+    }
+
+    SIDMJSON_ZSTR_ALLOC(valid_len + 1);
+    memcpy(output, start, valid_len);
+    output += valid_len;
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+}
+
 zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder)
 {
 	size_t len = ZSTR_LEN(str);
@@ -590,6 +667,10 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 
 	// Check if string is valid UTF-8 string
 	if (UNEXPECTED(!ZSTR_IS_VALID_UTF8(str) && !simdjson::validate_utf8(s, len))) {
+	    if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE) {
+	        simdjson_escape_substitute_string(buf, s, len);
+	        return SUCCESS;
+	    }
 		encoder->error_code = SIMDJSON_ERROR_UTF8;
 		return FAILURE;
     }
