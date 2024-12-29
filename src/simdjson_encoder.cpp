@@ -603,13 +603,13 @@ static void simdjson_escape_substitute_string(smart_str *buf, const char *s, siz
 
     for (; c < s + len; prev = current, ++c) {
         unsigned char current_char = (unsigned char)*c;
+        if (start == NULL) {
+            start = c;
+        }
         switch (simdjson_unicode_decode(&current, &codepoint, current_char)) {
             case SIMDJSON_UTF8_ACCEPT:
-                if (start == NULL) {
-                    start = c;
-                }
                 if (EXPECTED(simdjson_need_escaping[current_char] == 0)) {
-                    valid_len++;
+                    valid_len = c - start + 1;
                 } else {
                     // Append valid chars
                     SIDMJSON_ZSTR_ALLOC(valid_len + 8);
