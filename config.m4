@@ -36,6 +36,7 @@ if test "$PHP_SIMDJSON" != "no"; then
       src/simdjson_decoder.cpp            \
       src/countlut.cpp                    \
       src/simdjson_encoder.cpp            \
+      src/simdutf.cpp                     \
       src/simdjson.cpp],
     $ext_shared,, "-std=c++17 -DZEND_ENABLE_STATIC_TSRMLS_CACHE=1 -DSIMDJSON_EXCEPTIONS=0 -DSIMDJSON_DEVELOPMENT_CHECKS=0", cxx)
 

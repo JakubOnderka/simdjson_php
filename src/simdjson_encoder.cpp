@@ -19,6 +19,7 @@
 #include <config.h>
 #endif
 
+extern "C" {
 #include "php.h"
 #include "zend_smart_str.h"
 #include "zend_portability.h"
@@ -28,7 +29,9 @@
 #include "zend_property_hooks.h"
 #include "zend_lazy_objects.h"
 #endif
+}
 
+#include "php_simdjson.h"
 #include "simdjson_encoder.h"
 #include "countlut.h"
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
@@ -40,6 +43,7 @@
 #include "simdjson.h"
 #include "simdjson_compatibility.h"
 #include "simdjson_smart_str.h"
+#include "simdutf.h"
 
 static zend_always_inline bool simdjson_check_stack_limit(void)
 {
@@ -697,6 +701,23 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
     return SUCCESS;
 }
 
+static zend_result simdjson_encode_base64_object(smart_str *buf, const zval *val)
+{
+    zval *res = &Z_OBJ_P(val)->properties_table[0];
+    zend_string *res_string = Z_STR_P(res);
+
+    // As we are sure that base64 encoded string is always valid UTF-8 and do not contain any char that need to be
+    // escaped, so we can skip all checks and just directly copy encoded string to output buffer
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(res_string));
+    char* output = simdjson_smart_str_extend(buf, encoded_length + 2);
+    *output++ = '"';
+    simdutf::binary_to_base64(ZSTR_VAL(res_string), ZSTR_LEN(res_string), output);
+    output += encoded_length;
+    *output = '"';
+
+    return SUCCESS;
+}
+
 static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, simdjson_encoder *encoder) /* {{{ */
 {
 	zend_class_entry *ce = Z_OBJCE_P(val);
@@ -839,6 +860,9 @@ again:
 			return simdjson_escape_string(buf, Z_STR_P(val), encoder);
 
 		case IS_OBJECT:
+			if (instanceof_function(Z_OBJCE_P(val), simdjson_base64_encode_ce)) {
+                return simdjson_encode_base64_object(buf, val);
+            }
 			if (instanceof_function(Z_OBJCE_P(val), php_json_serializable_ce)) {
 				return simdjson_encode_serializable_object(buf, val, encoder);
 			}

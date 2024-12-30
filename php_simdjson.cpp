@@ -21,8 +21,8 @@ extern "C" {
 #include "zend_smart_str.h"
 #include "main/SAPI.h"
 #include "ext/standard/info.h"
-#include "ext/standard/flock_compat.h"
 #include "ext/spl/spl_exceptions.h"
+#include "ext/json/php_json.h" /* For php_json_serializable_ce */
 
 #include "php_simdjson.h"
 
@@ -30,6 +30,7 @@ extern "C" {
  * Both the declaration and the definition of PHP_SIMDJSON_API variables, functions must be within an 'extern "C"' block for Windows
  */
 PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
+PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
 } /* end extern "C" */
 
@@ -40,6 +41,7 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
 #include "src/simdjson_encoder.h"
 /* Single header file from fork of simdjson C project (to imitate php's handling of infinity/overflowing integers in json_decode) */
 #include "src/simdjson.h"
+#include "src/simdutf.h"
 
 #include "simdjson_arginfo.h"
 
@@ -447,6 +449,33 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     RETURN_TRUE;
 }
 
+PHP_METHOD(SimdJsonBase64Encode, __construct) {
+    zend_string *string = NULL;
+
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_STR(string)
+    ZEND_PARSE_PARAMETERS_END();
+
+    return_value = ZEND_THIS;
+
+    zend_string_addref(string);
+    ZVAL_STR(&Z_OBJ_P(return_value)->properties_table[0], string);
+}
+
+PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
+    ZEND_PARSE_PARAMETERS_NONE();
+
+    zval *res = &Z_OBJ_P(ZEND_THIS)->properties_table[0];
+    zend_string *res_string = Z_STR_P(res);
+
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(res_string));
+    zend_string *result = zend_string_alloc(encoded_length, 0);
+    simdutf::binary_to_base64(ZSTR_VAL(res_string), ZSTR_LEN(res_string), ZSTR_VAL(result));
+    GC_ADD_FLAGS(result, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
+
+    RETURN_STR(result);
+}
+
 /** {{{ PHP_GINIT_FUNCTION
 */
 PHP_GINIT_FUNCTION (simdjson) {
@@ -466,6 +495,7 @@ PHP_MINIT_FUNCTION (simdjson) {
 #endif
 
 	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
+	simdjson_base64_encode_ce = register_class_SimdJsonBase64Encode(php_json_serializable_ce);
 
     register_simdjson_symbols(0);
 

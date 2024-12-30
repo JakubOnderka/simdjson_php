@@ -328,3 +328,29 @@ function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, 
 
 class SimdJsonException extends RuntimeException {
 }
+
+/**
+ * Optimised converting base64 encoded string to JSON
+ * When converting base64 encoded string JSON, we can avoid all checks – that string is valid unicode and that sting need
+ * to be escaped.
+ * @strict-properties
+ */
+final class SimdJsonBase64Encode implements JsonSerializable {
+    private string $string;
+
+    /**
+     * @param string $string The data to encode.
+     */
+    public function __construct(string $string) {}
+
+    /**
+     * @return mixed Base64 encoded string
+     */
+    public function jsonSerialize(): mixed {}
+
+    /**
+     * @return string Base64 encoded string
+     * @alias SimdJsonBase64Encode::jsonSerialize
+     */
+    public function __toString(): string {}
+}

@@ -1,6 +1,6 @@
 # simdjson_php
 
-🚀 Super fast JSON encoding and decoding for PHP that utilise [simdjson project](https://github.com/lemire/simdjson). 
+🚀 Super fast JSON encoding and decoding for PHP that utilise [simdjson project](https://github.com/lemire/simdjson).
 
 *This is a fork of [crazyxman/simdjson_php](https://github.com/crazyxman/simdjson_php) with new optimisations and encoding support.*
 
@@ -13,7 +13,7 @@
 * Validation is 6× faster compared to PHP's `json_validate()`
 
 | Method              | Original | simdjson_php | Speedup  |
-|---------------------|----------|--------------|----------| 
+|---------------------|----------|--------------|----------|
 | Decode to array     | 1.48 ms  | 0.49 ms      | **3.0×** |
 | Decode to object    | 1.59 ms  | 0.69 ms      | **2.3×** |
 | Encode              | 0.67 ms  | 0.26 ms      | **2.5×** |
@@ -121,6 +121,18 @@ Differences are:
 * uses different algorithm to convert floating-point number to string, so string format can be slightly different
 * even when `JSON_UNESCAPED_UNICODE` is enabled, PHP `json_encode()` escapes some Unicode chars that do not need to be escaped. `simdjson_encode()` escape just Unicode chars that needs to be escaped by JSON spec.
 * `simdjson_encode_to_stream()` method allows you to write encoded string directly to PHP stream
+
+### Base64 encoding
+
+JSON format do not support binary data. Common way how to transfer binary data in JSON encoding is using base64 encoding.
+If you need to include base64 encoded value into JSON, you can use `SimdJsonBase64Encode` class that offers optimised converting to base64 value into JSON and use less memory.
+As creating new object in PHP is relatively slow, this approach make sense for string longer than 1 kB.
+
+```php
+$fileContent = file_get_contents("example.jpg");
+$fileContentEncoded = new SimdJsonBase64Encode($fileContent);
+simdjson_encode(['image' => $fileContentEncoded]); // returns {"image":"TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu..."}
+```
 
 ## Decoder edge cases
 

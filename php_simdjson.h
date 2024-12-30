@@ -107,8 +107,9 @@ ZEND_TSRMLS_CACHE_EXTERN()
 #	define PHP_SIMDJSON_API /* nothing special */
 #endif
 
-/** Defines 'class SimdJsonException' */
+/** Defines 'class SimdJsonException' and 'class SimdJsonBase64Encode' */
 extern PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
+extern PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
 /**
  * NOTE: Namespaces and references(&) and classes (instead of structs) are C++ only functionality.
