@@ -670,17 +670,19 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 	}
 
 	// Check if string is valid UTF-8 string
-	if (UNEXPECTED(!ZSTR_IS_VALID_UTF8(str) && !simdjson::validate_utf8(s, len))) {
-	    if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE) {
-	        simdjson_escape_substitute_string(buf, s, len);
-	        return SUCCESS;
-	    }
-		encoder->error_code = SIMDJSON_ERROR_UTF8;
-		return FAILURE;
+	if (!ZSTR_IS_VALID_UTF8(str)) {
+	    if (EXPECTED(simdjson::validate_utf8(s, len))) {
+	        // Mark string as valid UTF-8
+        	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+	    } else {
+            if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE) {
+                simdjson_escape_substitute_string(buf, s, len);
+                return SUCCESS;
+            }
+            encoder->error_code = SIMDJSON_ERROR_UTF8;
+            return FAILURE;
+		}
     }
-
-    // Mark string as valid UTF-8
-	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
 
 #ifdef __SSE2__
    if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
@@ -860,10 +862,10 @@ again:
 			return simdjson_escape_string(buf, Z_STR_P(val), encoder);
 
 		case IS_OBJECT:
-			if (instanceof_function(Z_OBJCE_P(val), simdjson_base64_encode_ce)) {
+			if (Z_OBJCE_P(val) == simdjson_base64_encode_ce) {
                 return simdjson_encode_base64_object(buf, val);
             }
-			if (instanceof_function(Z_OBJCE_P(val), php_json_serializable_ce)) {
+			if (instanceof_function_slow(Z_OBJCE_P(val), php_json_serializable_ce)) {
 				return simdjson_encode_serializable_object(buf, val, encoder);
 			}
 #if PHP_VERSION_ID >= 80100
