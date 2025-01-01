@@ -459,18 +459,17 @@ PHP_METHOD(SimdJsonBase64Encode, __construct) {
     return_value = ZEND_THIS;
 
     zend_string_addref(string);
-    ZVAL_STR(&Z_OBJ_P(return_value)->properties_table[0], string);
+    ZVAL_STR(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 0), string);
 }
 
 PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
     ZEND_PARSE_PARAMETERS_NONE();
 
-    zval *res = &Z_OBJ_P(ZEND_THIS)->properties_table[0];
-    zend_string *res_string = Z_STR_P(res);
+    zend_string *input = Z_STR_P(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 0));
 
-    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(res_string));
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(input));
     zend_string *result = zend_string_alloc(encoded_length, 0);
-    simdutf::binary_to_base64(ZSTR_VAL(res_string), ZSTR_LEN(res_string), ZSTR_VAL(result));
+    simdutf::binary_to_base64(ZSTR_VAL(input), ZSTR_LEN(input), ZSTR_VAL(result));
     GC_ADD_FLAGS(result, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
 
     RETURN_STR(result);

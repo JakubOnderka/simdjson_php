@@ -570,80 +570,111 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
     ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
 }
 
-// Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
-// See http://bjoern.hoehrmann.de/utf-8/decoder/dfa/ for details.
-static zend_always_inline uint32_t simdjson_unicode_decode(uint32_t* state, uint32_t* codep, uint32_t byte)
-{
-    uint32_t type = simdjson_utf8d[byte];
+/* valid as single byte character or leading byte */
+#define utf8_lead(c)  ((c) < 0x80 || ((c) >= 0xC2 && (c) <= 0xF4))
+/* whether it's actually valid depends on other stuff;
+ * this macro cannot check for non-shortest forms, surrogates or
+ * code points above 0x10FFFF */
+#define utf8_trail(c) ((c) >= 0x80 && (c) <= 0xBF)
 
-    *codep = (*state != SIMDJSON_UTF8_ACCEPT) ?
-        (byte & 0x3fu) | (*codep << 6) :
-        (0xff >> type) & (byte);
+// Simplified version of php_next_utf8_char
+static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
+	if (!str_len >= 1)
+		return 1;
 
-    *state = simdjson_utf8d[256 + *state*16 + type];
-    return *state;
+    /* We'll follow strategy 2. from section 3.6.1 of UTR #36:
+     * "In a reported illegal byte sequence, do not include any
+     *  non-initial byte that encodes a valid character or is a leading
+     *  byte for a valid sequence." */
+    unsigned char c;
+    c = str[0];
+    if (c < 0x80 || c < 0xc2) {
+        return 1;
+    } else if (c < 0xe0) {
+        if (!str_len >= 2)
+            return 1;
+
+        if (!utf8_trail(str[1])) {
+            return utf8_lead(str[1]) ? 1 : 2;
+        }
+        return 2;
+    } else if (c < 0xf0) {
+        size_t avail = str_len;
+
+        if (avail < 3 ||
+                !utf8_trail(str[1]) || !utf8_trail(str[2])) {
+            if (avail < 2 || utf8_lead(str[1]))
+                return 1;
+            else if (avail < 3 || utf8_lead(str[2]))
+                return 2;
+            else
+                return 3;
+        }
+
+        return 3;
+    } else if (c < 0xf5) {
+        size_t avail = str_len;
+
+        if (avail < 4 ||
+                !utf8_trail(str[1]) || !utf8_trail(str[2]) ||
+                !utf8_trail(str[3])) {
+            if (avail < 2 || utf8_lead(str[1]))
+                return 1;
+            else if (avail < 3 || utf8_lead(str[2]))
+                return 2;
+            else if (avail < 4 || utf8_lead(str[3]))
+                return 3;
+            else
+                return 4;
+        }
+
+        return 4;
+    } else {
+        return 1;
+    }
 }
 
-static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len)
+static void simdjson_escape_substitute_string(smart_str *buf, const char *s, const size_t len)
 {
-    uint32_t codepoint = 0, prev = 0, current = 0, skip = 0;
-    const char* start = NULL;
-    const char* c = s;
-    char* output;
-    size_t valid_len = 0;
+    const char *end = s + len;
 
-    output = simdjson_smart_str_alloc(buf, len + 2);
+    char* output = simdjson_smart_str_alloc(buf, len + 2);
     *output++ = '"';
 
-    for (; c < s + len; prev = current, ++c) {
-        unsigned char current_char = (unsigned char)*c;
-        if (start == NULL) {
-            start = c;
-        }
-        switch (simdjson_unicode_decode(&current, &codepoint, current_char)) {
-            case SIMDJSON_UTF8_ACCEPT:
-                if (EXPECTED(simdjson_need_escaping[current_char] == 0)) {
-                    valid_len = c - start + 1;
+    while (s < end) {
+        simdutf::result res = simdutf::validate_utf8_with_errors(s, end - s);
+        if (res.error != simdutf::error_code::SUCCESS) {
+            // Escape string that is considered valid
+            SIDMJSON_ZSTR_ALLOC(res.count * 6 + 4);
+            const char* last_char = s + res.count;
+            while (s < last_char) {
+                char c = *s++;
+                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                    *output++ = c;
                 } else {
-                    // Append valid chars
-                    SIDMJSON_ZSTR_ALLOC(valid_len + 8);
-                    memcpy(output, start, valid_len);
-                    output += valid_len;
-                    // Append escaped char
-                    output += simdjson_append_escape(output, *c);
-                    // Start again from next char
-                    valid_len = 0;
-                    start = c + 1;
+                    output += simdjson_append_escape(output, c);
                 }
-                break;
-
-            case SIMDJSON_UTF8_REJECT:
-                // Append valid chars and UTF-8 replace char �
-                SIDMJSON_ZSTR_ALLOC(valid_len + 3);
-                memcpy(output, start, valid_len);
-                output += valid_len;
-                memcpy(output, "\xef\xbf\xbd", 3);
-                output += 3;
-                // Reset vars
-                start = NULL;
-                c += skip;
-                skip = 0;
-                valid_len = 0;
-                current = SIMDJSON_UTF8_ACCEPT;
-                if (prev != SIMDJSON_UTF8_ACCEPT) {
-                    c--;
-                }
-                break;
-
-            default:
-                skip = current / 3;
-                break;
+            }
+            // Add replacement char
+            memcpy(output, "\xef\xbf\xbd", 3);
+            output += 3;
+            // Compute how much chars we need to skip
+            s += simdjson_get_next_char((unsigned char *)s, end - s);
+        } else {
+            break;
         }
     }
 
-    SIDMJSON_ZSTR_ALLOC(valid_len + 1);
-    memcpy(output, start, valid_len);
-    output += valid_len;
+    SIDMJSON_ZSTR_ALLOC((end - s) * 6 + 4);
+    while (s < end) {
+        char c = *s++;
+        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+            *output++ = c;
+        } else {
+            output += simdjson_append_escape(output, c);
+        }
+    }
+
     *output++ = '"';
 
     ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
