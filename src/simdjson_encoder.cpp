@@ -494,7 +494,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
             output += sizeof(chunk);
             s += sizeof(chunk);
 		} else {
-            // Allocate enought space for escaped chunk + space for rest of unescaped string
+            // Allocate enough space for escaped chunk + space for rest of unescaped string
             SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + ((start + len) - s));
 
             // Copy first bytes that do not need escaping in chunk without checking
@@ -549,32 +549,22 @@ TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, 
 }
 #endif
 
-static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len)
+static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, const size_t len)
 {
+    const char *end = s + len;
+
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
     char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
+
     *output++ = '"';
-
-    size_t start = 0;
-    for (size_t pos = 0; pos < len; ++pos) {
-    	char c = s[pos];
-    	if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-    		continue;
-    	}
-
-        memcpy(output, s + start, pos - start);
-        output += pos - start;
-
-    	output += simdjson_append_escape(output, c);
-
-    	start = pos + 1;
+    while (s < end) {
+        char c = *s++;
+        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+            *output++ = c;
+        } else {
+            output += simdjson_append_escape(output, c);
+        }
     }
-
-    if (start != len) {
-        memcpy(output, s + start, len - start);
-        output += len - start;
-    }
-
     *output++ = '"';
 
     ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
