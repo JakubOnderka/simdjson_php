@@ -578,7 +578,8 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
 #define utf8_trail(c) ((c) >= 0x80 && (c) <= 0xBF)
 
 // Simplified version of php_next_utf8_char
-static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
+static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len)
+{
 	if (!str_len >= 1)
 		return 1;
 
@@ -634,7 +635,7 @@ static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_
     }
 }
 
-static void simdjson_escape_substitute_string(smart_str *buf, const char *s, const size_t len)
+static void simdjson_escape_substitute_string(smart_str *buf, const char *s, const size_t len, bool substitute)
 {
     const char *end = s + len;
 
@@ -643,26 +644,27 @@ static void simdjson_escape_substitute_string(smart_str *buf, const char *s, con
 
     while (s < end) {
         simdutf::result res = simdutf::validate_utf8_with_errors(s, end - s);
-        if (res.error != simdutf::error_code::SUCCESS) {
-            // Escape string that is considered valid
-            SIDMJSON_ZSTR_ALLOC(res.count * 6 + 4);
-            const char* last_char = s + res.count;
-            while (s < last_char) {
-                char c = *s++;
-                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-                    *output++ = c;
-                } else {
-                    output += simdjson_append_escape(output, c);
-                }
+        if (res.error == simdutf::error_code::SUCCESS) {
+            break;
+        }
+        // Escape string that is considered valid
+        SIDMJSON_ZSTR_ALLOC(res.count * 6 + 4);
+        const char* last_char = s + res.count;
+        while (s < last_char) {
+            char c = *s++;
+            if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                *output++ = c;
+            } else {
+                output += simdjson_append_escape(output, c);
             }
+        }
+        if (substitute) {
             // Add replacement char
             memcpy(output, "\xef\xbf\xbd", 3);
             output += 3;
-            // Compute how much chars we need to skip
-            s += simdjson_get_next_char((unsigned char *)s, end - s);
-        } else {
-            break;
         }
+        // Compute how much chars we need to skip
+        s += simdjson_get_next_char((unsigned char *)s, end - s);
     }
 
     SIDMJSON_ZSTR_ALLOC((end - s) * 6 + 4);
@@ -696,8 +698,8 @@ zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_en
 	        // Mark string as valid UTF-8
         	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
 	    } else {
-            if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE) {
-                simdjson_escape_substitute_string(buf, s, len);
+            if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE || encoder->options & SIMDJSON_INVALID_UTF8_IGNORE) {
+                simdjson_escape_substitute_string(buf, s, len, encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE);
                 return SUCCESS;
             }
             encoder->error_code = SIMDJSON_ERROR_UTF8;

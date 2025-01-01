@@ -115,6 +115,7 @@ Most of available options of default `json_encode()` method are not supported by
 Supported options are:
 * `SIMDJSON_PRETTY_PRINT` - use whitespace in returned data to format it.
 * `SIMDJSON_INVALID_UTF8_SUBSTITUTE` - convert invalid UTF-8 characters to `\0xfffd` (Unicode Character 'REPLACEMENT CHARACTER' �)
+* `SIMDJSON_INVALID_UTF8_IGNORE` - ignore invalid UTF-8 characters
 * `SIMDJSON_APPEND_NEWLINE` - append new line character (`\n`) to end of encoded string. This is useful when encoding multiple objects to JSONL format as PHP strigns are immutable.
 
 Differences are:
