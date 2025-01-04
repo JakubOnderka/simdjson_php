@@ -129,7 +129,10 @@ build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc,
         }
     }
 
-    SIMDJSON_PHP_TRY(parser->parser.allocate(len, depth));
+    if (depth != parser->parser.max_depth()) {
+        SIMDJSON_PHP_TRY(parser->parser.allocate(len, depth));
+    }
+
     SIMDJSON_PHP_TRY(parser->parser.parse(buf, len, realloc_if_needed).get(doc));
 
     return simdjson::SUCCESS;
@@ -184,11 +187,13 @@ static zend_always_inline void simdjson_init_reused_key_strings(HashTable *repea
     }
 }
 
-static zend_always_inline void simdjson_clean_reused_key_strings(HashTable *ht) {
-    ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_REPEATED_STRINGS_COUNT));
-    HT_HASH_RESET(ht);
-    ht->nNumUsed = 0;
-    ht->nNumOfElements = 0;
+static zend_always_inline void simdjson_clean_reused_key_strings(HashTable *repeated_key_strings) {
+    ZEND_ASSERT(repeated_key_strings->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_REPEATED_STRINGS_COUNT));
+    if (repeated_key_strings->nNumUsed) {
+        HT_HASH_RESET(repeated_key_strings);
+        repeated_key_strings->nNumUsed = 0;
+        repeated_key_strings->nNumOfElements = 0;
+    }
 }
 
 /*
@@ -505,7 +510,10 @@ PHP_SIMDJSON_API simdjson_php_parser* php_simdjson_create_parser(void) /* {{{ */
 }
 
 PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {{{ */ {
-    zend_hash_destroy(&parser->repeated_key_strings);
+    // Destroy repeated_key_strings hash if was allocated
+    if (parser->repeated_key_strings.nTableSize) {
+        efree(HT_GET_DATA_ADDR(&parser->repeated_key_strings));
+    }
     delete parser;
 }
 
