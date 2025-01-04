@@ -26,8 +26,7 @@
 
 #if PHP_VERSION_ID < 80100
 /* Check if an array is a list */
-static int zend_array_is_list(HashTable *myht)
-{
+static int zend_array_is_list(HashTable *myht) {
     int i;
     i = myht ? zend_hash_num_elements(myht) : 0;
     if (i > 0) {
@@ -56,8 +55,7 @@ static int zend_array_is_list(HashTable *myht)
 #endif
 
 #if PHP_VERSION_ID < 80200
-static zend_always_inline bool zend_string_equals_cstr(const zend_string *s1, const char *s2, size_t s2_length)
-{
+static zend_always_inline bool zend_string_equals_cstr(const zend_string *s1, const char *s2, size_t s2_length) {
     return ZSTR_LEN(s1) == s2_length && !memcmp(ZSTR_VAL(s1), s2, s2_length);
 }
 #endif

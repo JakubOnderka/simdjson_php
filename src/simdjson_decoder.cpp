@@ -136,7 +136,7 @@ build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc,
 }
 
 static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *buf, size_t len) {
-    if (len <= 1) {
+    if (UNEXPECTED(len <= 1)) {
         /*
         A note on performance benefits of the use of interned strings here and elsewhere:
 
@@ -158,8 +158,7 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
 
 #if PHP_VERSION_ID >= 80200
 // Copy of PHP method zend_hash_str_find_bucket that is not exported without checking if p->key is not null
-static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h)
-{
+static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h) {
 	uint32_t nIndex;
 	uint32_t idx;
 	Bucket *p, *arData;
@@ -197,8 +196,7 @@ static zend_always_inline void simdjson_clean_reused_key_strings(HashTable *ht) 
  * This method check if key was already used in same JSON document and returns a reference or allocate new string if
  * is unique
  */
-static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const char *str, size_t len, zend_ulong h)
-{
+static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const char *str, size_t len, zend_ulong h) {
     uint32_t nIndex;
     uint32_t idx;
     Bucket *p;
@@ -237,8 +235,7 @@ static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const c
  *  - initialized array as zend_hash_real_init_mixed
  *  - exact size must be known in advance
  */
-static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *repeated_key_strings)
-{
+static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *repeated_key_strings) {
     uint32_t nIndex;
     uint32_t idx;
     Bucket *p;
