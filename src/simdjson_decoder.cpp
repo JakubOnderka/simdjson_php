@@ -248,9 +248,9 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
 
     // Check if array is initialized with proper flags and size
     // This checks are removed in production code
-    ZEND_ASSERT(HT_FLAGS(ht) & ~HASH_FLAG_UNINITIALIZED);
-    ZEND_ASSERT(HT_FLAGS(ht) & ~HASH_FLAG_PACKED);
-    ZEND_ASSERT(ht->nNumUsed < ht->nTableSize);
+    ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_UNINITIALIZED)); // make sure that hashtable was initialized
+    ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_PACKED)); // make sure that hashtable is not packed
+    ZEND_ASSERT(ht->nNumUsed < ht->nTableSize); // make sure that we still have space for new elements
 
     // Compute key hash
     h = zend_inline_hash_func(str, len);
