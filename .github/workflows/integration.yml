@@ -65,7 +65,7 @@ jobs:
           php-config --extension-dir
           phpize
           ./configure
-          make
+          make -j$(nproc)
           sudo make install
           make test TESTS="--show-diff" || exit 1
 
@@ -108,7 +108,7 @@ jobs:
         run: |
           phpize
           ./configure
-          make
+          make -j$(nproc)
 
       - name: Run tests
         run: make test TESTS="--show-diff"
