@@ -22,6 +22,15 @@ jobs:
       - name: "Show"
         run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
 
+  Ubuntu-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - name: "Build PHP and extension in development mode"
+        run: "docker build -t simdjsontest -f docker_php8.4-dev ."
+
   Ubuntu:
     strategy:
       fail-fast: false
@@ -99,7 +108,7 @@ jobs:
         run: |
           phpize
           ./configure
-          make 
+          make
 
       - name: Run tests
         run: make test TESTS="--show-diff"
