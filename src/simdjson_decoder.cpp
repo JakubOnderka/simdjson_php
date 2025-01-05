@@ -279,14 +279,14 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
 #endif // PHP_VERSION_ID >= 80200
 
 // Initialize mixed array with exact size (in PHP terminology mixed array is hash)
-static zend_always_inline zend_array* simdjson_init_mixed_array(zval *zv, uint32_t size) {
-    zend_array *arr;
+static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_t size) {
+    HashTable *ht;
     array_init_size(zv, size);
-    arr = Z_ARR_P(zv);
- #if PHP_VERSION_ID >= 80200
-    zend_hash_real_init_mixed(arr); // Expect mixed array
- #endif
-    return arr;
+    ht = Z_ARR_P(zv);
+#if PHP_VERSION_ID >= 80200
+    zend_hash_real_init_mixed(ht); // Expect mixed array
+#endif
+    return ht;
 }
 
 static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value,  HashTable *repeated_key_strings) {
@@ -396,12 +396,12 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
             // Allocate table for reusing already allocated keys
             simdjson_init_reused_key_strings(repeated_key_strings);
 #endif
-            zend_array *arr = simdjson_init_mixed_array(return_value, json_object.size());
+            HashTable *ht = simdjson_init_mixed_array(return_value, json_object.size());
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 zval array_element;
                 simdjson_create_array(field.value, &array_element, repeated_key_strings);
-                simdjson_add_key_to_symtable(arr, field.key.data(), field.key.size(), &array_element, repeated_key_strings);
+                simdjson_add_key_to_symtable(ht, field.key.data(), field.key.size(), &array_element, repeated_key_strings);
             }
             break;
         }
