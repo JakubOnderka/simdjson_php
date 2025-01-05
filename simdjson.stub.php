@@ -329,7 +329,7 @@ function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string
   * @param int $depth Set the maximum depth. Must be greater than zero.
   * @return bool
  */
-function simdjson_encode_to_stream(mixed $value, resource $res, int $flags = 0, int $depth = 512) : true {}
+function simdjson_encode_to_stream(mixed $value, $res, int $flags = 0, int $depth = 512) : true {}
 
 class SimdJsonException extends RuntimeException {
 }
