@@ -451,20 +451,20 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
 
 #define SIDMJSON_ZSTR_ALLOC(_size) \
     do { \
-        auto _new_len = _size + ZSTR_LEN(buf->s); \
-        if (UNEXPECTED(_new_len >= buf->a)) { \
+        auto _new_end = _size + output; \
+        if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
             ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s))); \
-            smart_str_erealloc(buf, _new_len); \
+            smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
             output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
         } \
     } while (0); \
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 template<typename T>
-static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, const size_t len) {
     T chunk;
     const char* start = s;
-    const size_t vlen = len & (int) (~(sizeof(chunk) - 1)); // max lenght that can be processed in chunk mode
+    const size_t vlen = len & (int) (~(sizeof(chunk) - 1)); // max length that can be processed in chunk mode
     char *output;
 
 	output = simdjson_smart_str_alloc(buf, len + 2);
@@ -478,13 +478,13 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
         auto needs_escaping = chunk.needs_escaping();
 		if (EXPECTED(!needs_escaping)) {
             // If no escape char found, store chunk in output buffer and move buffer pointer
+            ZEND_ASSERT(output + sizeof(chunk) <= ZSTR_VAL(buf->s) + buf->a);
 			chunk.store((uint8_t*)output);
             output += sizeof(chunk);
             s += sizeof(chunk);
 		} else {
             // Allocate enough space for escaped chunk + space for rest of unescaped string
-            SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + ((start + len) - s));
-
+            SIDMJSON_ZSTR_ALLOC((sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH) + (start + len - s));
             // Copy first bytes that do not need escaping in chunk without checking
             auto j = chunk.escape_index(needs_escaping);
             memcpy(output, s, j);
