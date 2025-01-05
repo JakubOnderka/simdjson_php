@@ -505,6 +505,7 @@ PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
     size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(input));
     zend_string *result = zend_string_alloc(encoded_length, 0);
     simdutf::binary_to_base64(ZSTR_VAL(input), ZSTR_LEN(input), ZSTR_VAL(result));
+    ZSTR_VAL(result)[encoded_length] = '\0';
     GC_ADD_FLAGS(result, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
 
     RETURN_STR(result);
