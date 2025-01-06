@@ -100,7 +100,7 @@ static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) 
 }
 
 /** Decoded string from JSON must be always UTF-8 valid, so we can provide proper flag to zend_string */
-static zend_always_inline zend_string* simdjson_string_init(const char* buf, const size_t len) {
+static zend_always_inline zend_string* simdjson_string_init(const char* buf, size_t len) {
     zend_string *str = zend_string_init(buf, len, 0);
     GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
     return str;
@@ -289,7 +289,7 @@ static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_
     return ht;
 }
 
-static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value,  HashTable *repeated_key_strings) {
+static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value, HashTable *repeated_key_strings) {
 #if PHP_VERSION_ID >= 80200
     zend_ulong idx;
     if (UNEXPECTED(ZEND_HANDLE_NUMERIC_STR(buf, len, idx))) {
@@ -317,7 +317,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
 #endif // PHP_VERSION_ID >= 80200
 }
 
-static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, const int64_t value) {
+static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, int64_t value) {
 #if SIZEOF_ZEND_LONG < 8
     if (value != (zend_long)value) {
         ZVAL_DOUBLE(zv, value);

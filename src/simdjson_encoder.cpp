@@ -443,7 +443,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, simdjson_enc
 	return SUCCESS;
 }
 
-static zend_always_inline size_t simdjson_append_escape(char *buf, const char c) {
+static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
 	auto append = simdjson_escape[c];
 	memcpy(buf, append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
 	return append.len;
@@ -461,7 +461,7 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
 
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 template<typename T>
-static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, const size_t len) {
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
     T chunk;
     const char* start = s;
     const size_t vlen = len & (int) (~(sizeof(chunk) - 1)); // max length that can be processed in chunk mode
@@ -535,7 +535,7 @@ TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, 
 }
 #endif
 
-static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, const size_t len) {
+static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
     const char *end = s + len;
 
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
@@ -619,7 +619,7 @@ static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_
     }
 }
 
-static void simdjson_escape_substitute_string(smart_str *buf, const char *s, const size_t len, bool substitute) {
+static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len, bool substitute) {
     const char *end = s + len;
 
     char* output = simdjson_smart_str_alloc(buf, len + 2);
@@ -708,20 +708,17 @@ static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simd
     return SUCCESS;
 }
 
-static zend_result simdjson_encode_base64_object(smart_str *buf, const zval *val) {
-    zval *res = &Z_OBJ_P(val)->properties_table[0];
-    zend_string *res_string = Z_STR_P(res);
+static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
+    zend_string *binary_string = Z_STR(Z_OBJ_P(val)->properties_table[0]);
 
     // As we are sure that base64 encoded string is always valid UTF-8 and do not contain any char that need to be
     // escaped, so we can skip all checks and just directly copy encoded string to output buffer
-    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(res_string));
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string));
     char* output = simdjson_smart_str_extend(buf, encoded_length + 2);
     *output++ = '"';
-    simdutf::binary_to_base64(ZSTR_VAL(res_string), ZSTR_LEN(res_string), output);
+    simdutf::binary_to_base64(ZSTR_VAL(binary_string), ZSTR_LEN(binary_string), output);
     output += encoded_length;
     *output = '"';
-
-    return SUCCESS;
 }
 
 static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
@@ -863,7 +860,8 @@ again:
 
 		case IS_OBJECT:
 			if (Z_OBJCE_P(val) == simdjson_base64_encode_ce) {
-                return simdjson_encode_base64_object(buf, val);
+                simdjson_encode_base64_object(buf, val);
+                return SUCCESS;
             }
 			if (instanceof_function_slow(Z_OBJCE_P(val), php_json_serializable_ce)) {
 				return simdjson_encode_serializable_object(buf, val, encoder);
