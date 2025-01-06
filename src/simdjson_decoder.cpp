@@ -156,7 +156,8 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
         ZVAL_INTERNED_STR(v, key);
         return;
     }
-    ZVAL_STRINGL(v, buf, len);
+    zend_string *input = simdjson_string_init(buf, len);
+    ZVAL_NEW_STR(v, input);
 }
 
 #if PHP_VERSION_ID >= 80200
