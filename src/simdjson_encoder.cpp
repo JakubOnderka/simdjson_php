@@ -453,7 +453,7 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, const char c)
     do { \
         auto _new_end = _size + output; \
         if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
-            ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s))); \
+            ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s); \
             smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
             output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
         } \
@@ -517,7 +517,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 	}
     *output++ = '"';
 
-    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
 }
 #endif
 
@@ -552,7 +552,7 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
     }
     *output++ = '"';
 
-    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
 }
 
 /* valid as single byte character or leading byte */
@@ -662,7 +662,7 @@ static void simdjson_escape_substitute_string(smart_str *buf, const char *s, con
 
     *output++ = '"';
 
-    ZSTR_LEN(buf->s) += (output - (ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s)));
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
 }
 
 static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder) {
