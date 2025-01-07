@@ -67,7 +67,7 @@ jobs:
           ./configure
           make -j$(nproc)
           sudo make install
-          make test TESTS="--show-diff" || exit 1
+          make test TESTS="--show-diff -j2" || exit 1
 
       - name: "Show"
         run: "php -dextension=simdjson.so --ri simdjson"
@@ -113,4 +113,4 @@ jobs:
       - name: Run tests
         run: |
           export SIMDJSON_HIGH_MEMORY_TESTS=1
-          make test TESTS="--show-diff"
+          make test TESTS="--show-diff -j2"
