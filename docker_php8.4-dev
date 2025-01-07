@@ -1,14 +1,14 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && \
-    apt-get install -y curl gcc xz-utils libxml2-dev libsqlite3-dev pkg-config make autoconf g++ valgrind && \
+    apt-get install -y curl gcc xz-utils libxml2-dev pkg-config make autoconf g++ valgrind && \
     rm -rf /var/lib/apt/lists/
 
 RUN curl -LO https://www.php.net/distributions/php-8.4.2.tar.xz && \
     tar xf php-8.4.2.tar.xz && \
     rm -rf php-8.4.2.tar.xz && \
     cd php-8.4.2 && \
-    ./configure --enable-debug && \
+    ./configure --enable-debug --without-sqlite3 --without-pdo-sqlite && \
     make -j$(nproc) && \
     make install && \
     rm -rf /php-8.4.2
