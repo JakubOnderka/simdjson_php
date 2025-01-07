@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: ebea873e016b9c136bfbd095a585a05c7e66738e */
+ * Stub hash: 5b2147fe5e6865e7ab51e22a21cb235aeba0a12e */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -176,6 +176,7 @@ static zend_class_entry *register_class_SimdJsonException(zend_class_entry *clas
 
 	INIT_CLASS_ENTRY(ce, "SimdJsonException", class_SimdJsonException_methods);
 	class_entry = zend_register_internal_class_ex(&ce, class_entry_RuntimeException);
+	class_entry->ce_flags |= ZEND_ACC_ABSTRACT;
 
 	return class_entry;
 }

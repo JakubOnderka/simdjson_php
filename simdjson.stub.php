@@ -244,7 +244,7 @@ function simdjson_is_valid(string $json, int $depth = 512): bool {}
  *                          When false, JSON objects will be returned as objects.
  * @param int $depth the maximum nesting depth of the structure being decoded.
  * @return array|stdClass|string|float|int|bool|null
- * @throws SimdJsonException for invalid JSON
+ * @throws SimdJsonDecoderException for invalid JSON
  *                           (or $json over 4GB long, or out of range integer/float)
  * @throws ValueError for invalid $depth
  */
@@ -259,7 +259,7 @@ function simdjson_decode(string $json, bool $associative = false, int $depth = 5
  *                          When false, JSON objects will be returned as objects.
  * @param int $depth the maximum nesting depth of the structure being decoded.
  * @return array|stdClass|string|float|int|bool|null
- * @throws SimdJsonException for invalid JSON
+ * @throws SimdJsonDecoderException for invalid JSON
  *                           (or $json over 4GB long, or out of range integer/float)
  * @throws ValueError for invalid $depth
  */
@@ -274,7 +274,7 @@ function simdjson_decode_from_stream($res, bool $associative = false, int $depth
  * @param bool $associative When true, JSON objects will be returned as associative arrays.
  *                          When false, JSON objects will be returned as objects.
  * @return array|stdClass|string|float|int|bool|null the value at $key
- * @throws SimdJsonException for invalid JSON or invalid JSON pointer
+ * @throws SimdJsonDecoderException for invalid JSON or invalid JSON pointer
  *                           (or document over 4GB, or out of range integer/float)
  * @throws ValueError for invalid $depth
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
@@ -291,7 +291,7 @@ function simdjson_key_value(string $json, string $key, bool $associative = false
  *                                   returning 0 for JSON pointers
  *                                   to values that are neither objects nor arrays.
  * @return int
- * @throws SimdJsonException for invalid JSON or invalid JSON pointer
+ * @throws SimdJsonDecoderException for invalid JSON or invalid JSON pointer
  *                           (or document over 4GB, or out of range integer/float)
  * @throws ValueError for invalid $depth
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
@@ -305,7 +305,7 @@ function simdjson_key_count(string $json, string $key, int $depth = 512, bool $t
  * @param string $key The JSON pointer being requested
  * @param int $depth the maximum nesting depth of the structure being decoded.
  * @return bool (false if key is not found)
- * @throws SimdJsonException for invalid JSON or invalid JSON pointer
+ * @throws SimdJsonDecoderException for invalid JSON or invalid JSON pointer
  *                           (or document over 4GB, or out of range integer/float)
  * @throws ValueError for invalid $depth
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
@@ -332,21 +332,25 @@ function simdjson_is_valid_utf8(string $string): bool {}
  * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT or SIMDJSON_APPEND_NEWLINE.
  * @param int $depth Set the maximum depth. Must be greater than zero.
  * @return string
+ * @throws SimdJsonEncoderException
+ * @throws ValueError for invalid $depth
  */
 function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string {}
 
 /**
  * Writes the JSON representation of a value to given stream
  *
-  * @param mixed $value The value being encoded. Can be any type except a resource.
-  * @param resource $res A file system pointer resource that is typically created using fopen().
-  * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT, SIMDJSON_APPEND_NEWLINE or SIMDJSON_INVALID_UTF8_SUBSTITUTE.
-  * @param int $depth Set the maximum depth. Must be greater than zero.
-  * @return bool
+ * @param mixed $value The value being encoded. Can be any type except a resource.
+ * @param resource $res A file system pointer resource that is typically created using fopen().
+ * @param int $flags Bitmask consisting of SIMDJSON_PRETTY_PRINT, SIMDJSON_APPEND_NEWLINE or SIMDJSON_INVALID_UTF8_SUBSTITUTE.
+ * @param int $depth Set the maximum depth. Must be greater than zero.
+ * @return bool
+ * @throws SimdJsonEncoderException
+ * @throws ValueError for invalid $depth
  */
 function simdjson_encode_to_stream(mixed $value, $res, int $flags = 0, int $depth = 512) : true {}
 
-class SimdJsonException extends RuntimeException {}
+abstract class SimdJsonException extends RuntimeException {}
 
 class SimdJsonDecoderException extends SimdJsonException {}
 
