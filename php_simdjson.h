@@ -108,7 +108,8 @@ ZEND_TSRMLS_CACHE_EXTERN()
 #endif
 
 /** Defines 'class SimdJsonException' and 'class SimdJsonBase64Encode' */
-extern PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
+extern PHP_SIMDJSON_API zend_class_entry *simdjson_decoder_exception_ce;
+extern PHP_SIMDJSON_API zend_class_entry *simdjson_encoder_exception_ce;
 extern PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
 /**

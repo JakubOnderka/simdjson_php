@@ -346,8 +346,11 @@ function simdjson_encode(mixed $value, int $flags = 0, int $depth = 512): string
  */
 function simdjson_encode_to_stream(mixed $value, $res, int $flags = 0, int $depth = 512) : true {}
 
-class SimdJsonException extends RuntimeException {
-}
+class SimdJsonException extends RuntimeException {}
+
+class SimdJsonDecoderException extends SimdJsonException {}
+
+class SimdJsonEncoderException extends SimdJsonException {}
 
 /**
  * Optimised converting base64 encoded string to JSON

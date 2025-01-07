@@ -19,7 +19,7 @@ typedef enum {
     SIMDJSON_ERROR_UTF16,
     SIMDJSON_ERROR_NON_BACKED_ENUM,
     SIMDJSON_ERROR_STREAM_WRITE,
-} simdjson_error_code;
+} simdjson_encoder_error_code;
 
 /* simdjson_encode() options */
 #define SIMDJSON_PRETTY_PRINT               (1<<7)
@@ -33,7 +33,7 @@ struct _simdjson_encoder {
     int depth;
     int max_depth;
     int options;
-    simdjson_error_code error_code;
+    simdjson_encoder_error_code error_code;
     php_stream *stream;
 };
 

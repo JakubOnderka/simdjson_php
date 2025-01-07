@@ -73,11 +73,11 @@ Test '/code'
 int(123)
 int(123)
 Test '/code/0'
-Caught SimdJsonException: The JSON field referenced does not exist in this object.
-Caught SimdJsonException: The JSON field referenced does not exist in this object.
+Caught SimdJsonDecoderException: The JSON field referenced does not exist in this object.
+Caught SimdJsonDecoderException: The JSON field referenced does not exist in this object.
 Test '/code/x'
-Caught SimdJsonException: The JSON field referenced does not exist in this object.
-Caught SimdJsonException: The JSON field referenced does not exist in this object.
+Caught SimdJsonDecoderException: The JSON field referenced does not exist in this object.
+Caught SimdJsonDecoderException: The JSON field referenced does not exist in this object.
 Test '/values'
 array(1) {
   [0]=>
@@ -95,11 +95,11 @@ object(stdClass)#2 (0) {
 array(0) {
 }
 Test '/values/1'
-Caught SimdJsonException: Attempted to access an element of a JSON array that is beyond its length.
-Caught SimdJsonException: Attempted to access an element of a JSON array that is beyond its length.
+Caught SimdJsonDecoderException: Attempted to access an element of a JSON array that is beyond its length.
+Caught SimdJsonDecoderException: Attempted to access an element of a JSON array that is beyond its length.
 Test '/values/-1'
-Caught SimdJsonException: The JSON element does not have the requested type.
-Caught SimdJsonException: The JSON element does not have the requested type.
+Caught SimdJsonDecoderException: The JSON element does not have the requested type.
+Caught SimdJsonDecoderException: The JSON element does not have the requested type.
 Test '/obj'
 object(stdClass)#2 (1) {
   ["z"]=>

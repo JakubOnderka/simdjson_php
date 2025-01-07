@@ -7,7 +7,7 @@ function compat_decode($value) {
     $lasterr = 0;
     try {
         return simdjson_decode($value);
-    } catch (SimdJsonException $e) {
+    } catch (SimdJsonDecoderException $e) {
         return sprintf("%s: %d: %s", get_class($e), $e->getCode(), $e->getMessage());
     }
 }
@@ -28,13 +28,13 @@ var_dump(compat_decode("\"\x00\""));
 var_dump(SIMDJSON_ERR_UNESCAPED_CHARS);
 ?>
 --EXPECTF--
-string(%d) "SimdJsonException: %d: no JSON found"
-string(%d) "SimdJsonException: %d: no JSON found"
+string(%d) "SimdJsonDecoderException: %d: no JSON found"
+string(%d) "SimdJsonDecoderException: %d: no JSON found"
 int(0)
 int(1)
 int(1)
-string(%d) "SimdJsonException: %d: %s
-string(124) "SimdJsonException: 3: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc."
-string(51) "SimdJsonException: %d: The input is not valid UTF-8"
-string(101) "SimdJsonException: %d: Within strings, some characters must be escaped, we found unescaped characters"
+string(%d) "SimdJsonDecoderException: %d: %s
+string(%d) "SimdJsonDecoderException: 3: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc."
+string(%d) "SimdJsonDecoderException: %d: The input is not valid UTF-8"
+string(%d) "SimdJsonDecoderException: %d: Within strings, some characters must be escaped, we found unescaped characters"
 int(%d)

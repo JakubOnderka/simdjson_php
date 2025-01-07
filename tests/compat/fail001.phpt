@@ -35,13 +35,13 @@ foreach ($tests as $test) {
     echo "AS OBJECT\n";
     try {
         var_dump(simdjson_decode($test));
-    } catch (SimdJsonException $e) {
+    } catch (SimdJsonDecoderException $e) {
         printf("Caught %s: %s\n", get_class($e), $e->getMessage());
     }
     echo "AS ARRAY\n";
     try {
         var_dump(simdjson_decode($test, true));
-    } catch (SimdJsonException $e) {
+    } catch (SimdJsonDecoderException $e) {
         printf("Caught %s: %s\n", get_class($e), $e->getMessage());
     }
 }
@@ -55,116 +55,116 @@ AS ARRAY
 string(58) "A JSON payload should be an object or array, not a string."
 Testing: ["Unclosed array"
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {unquoted_key: "keys must be quoted}
 AS OBJECT
-Caught SimdJsonException: A string is opened, but never closed.
+Caught SimdJsonDecoderException: A string is opened, but never closed.
 AS ARRAY
-Caught SimdJsonException: A string is opened, but never closed.
+Caught SimdJsonDecoderException: A string is opened, but never closed.
 Testing: ["extra comma",]
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: ["double extra comma",,]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 Testing: [   , "<-- missing value"]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 Testing: ["Comma after the close"],
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: ["Extra close"]]
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Extra comma": true,}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Extra value after close": true} "misplaced quoted value"
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Illegal expression": 1 + 2}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Illegal invocation": alert()}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Numbers cannot have leading zeroes": 013}
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 Testing: {"Numbers cannot be hex": 0x14}
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 Testing: ["Illegal backslash escape: \x15"]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 Testing: ["Illegal backslash escape: \'"]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 Testing: ["Illegal backslash escape: \017"]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a string
+Caught SimdJsonDecoderException: Problem while parsing a string
 Testing: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[["Too deep"]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
 AS OBJECT
-Caught SimdJsonException: The JSON document was too deep (too many nested objects and arrays)
+Caught SimdJsonDecoderException: The JSON document was too deep (too many nested objects and arrays)
 AS ARRAY
-Caught SimdJsonException: The JSON document was too deep (too many nested objects and arrays)
+Caught SimdJsonDecoderException: The JSON document was too deep (too many nested objects and arrays)
 Testing: {"Missing colon" null}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Double colon":: null}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: {"Comma instead of colon", null}
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: ["Colon instead of comma": false]
 AS OBJECT
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 AS ARRAY
-Caught SimdJsonException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
+Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.
 Testing: ["Bad value", truth]
 AS OBJECT
-Caught SimdJsonException: Problem while parsing an atom starting with the letter 't'
+Caught SimdJsonDecoderException: Problem while parsing an atom starting with the letter 't'
 AS ARRAY
-Caught SimdJsonException: Problem while parsing an atom starting with the letter 't'
+Caught SimdJsonDecoderException: Problem while parsing an atom starting with the letter 't'
 Testing: ['single quote']
 AS OBJECT
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number
 AS ARRAY
-Caught SimdJsonException: Problem while parsing a number
+Caught SimdJsonDecoderException: Problem while parsing a number

@@ -29,7 +29,8 @@ extern "C" {
 /**
  * Both the declaration and the definition of PHP_SIMDJSON_API variables, functions must be within an 'extern "C"' block for Windows
  */
-PHP_SIMDJSON_API zend_class_entry *simdjson_exception_ce;
+PHP_SIMDJSON_API zend_class_entry *simdjson_decoder_exception_ce;
+PHP_SIMDJSON_API zend_class_entry *simdjson_encoder_exception_ce;
 PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
 } /* end extern "C" */
@@ -415,7 +416,7 @@ PHP_FUNCTION(simdjson_is_valid_utf8) {
     RETURN_BOOL(is_ok);
 }
 
-static const char *simdjson_get_error_msg(simdjson_error_code error_code) {
+static const char *simdjson_get_error_msg(simdjson_encoder_error_code error_code) {
     switch(error_code) {
         case SIMDJSON_ERROR_NONE:
             return "No error";
@@ -529,7 +530,7 @@ PHP_FUNCTION(simdjson_encode) {
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
         efree(buf.s);
-        zend_throw_exception(simdjson_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
+        zend_throw_exception(simdjson_encoder_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
         RETURN_THROWS();
     }
 
@@ -580,7 +581,7 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     efree(buf.s);
 
     if (UNEXPECTED(encoder.error_code != SIMDJSON_ERROR_NONE)) {
-        zend_throw_exception(simdjson_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
+        zend_throw_exception(simdjson_encoder_exception_ce, simdjson_get_error_msg(encoder.error_code), encoder.error_code);
         RETURN_THROWS();
     }
 
@@ -630,7 +631,10 @@ PHP_MINIT_FUNCTION (simdjson) {
     GC_ADD_FLAGS(simdjson_json_empty_array, IS_STR_VALID_UTF8);
 #endif
 
-	simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
+    auto simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
+	simdjson_decoder_exception_ce = register_class_SimdJsonDecoderException(simdjson_exception_ce);
+	simdjson_encoder_exception_ce = register_class_SimdJsonEncoderException(simdjson_exception_ce);
+
 	simdjson_base64_encode_ce = register_class_SimdJsonBase64Encode(php_json_serializable_ce);
 
     register_simdjson_symbols(0);

@@ -46,7 +46,7 @@ PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code erro
 }
 
 PHP_SIMDJSON_API void php_simdjson_throw_jsonexception(simdjson_php_error_code error) {
-    zend_throw_exception(simdjson_exception_ce, php_simdjson_error_msg(error), (zend_long) error);
+    zend_throw_exception(simdjson_decoder_exception_ce, php_simdjson_error_msg(error), (zend_long) error);
 }
 
 static inline simdjson::simdjson_result<simdjson::dom::element>

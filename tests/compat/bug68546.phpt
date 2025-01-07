@@ -23,8 +23,8 @@ echo json_encode(simdjson_decode('{"key": {"\u0000": "aa"}}', true)), "\n";
 echo "Done\n";
 ?>
 --EXPECT--
-Caught SimdJsonException: 255 Invalid property name
-Caught SimdJsonException: 255 Invalid property name
+Caught SimdJsonDecoderException: 255 Invalid property name
+Caught SimdJsonDecoderException: 255 Invalid property name
 Arrays allow empty keys
 {"key":{"\u0000":"aa"}}
 Done

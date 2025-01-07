@@ -17,8 +17,8 @@ simdjson_decode_invalid_utf8("[\"\xc1\xc1\",\"a\"]");
 echo "Done\n";
 ?>
 --EXPECT--
-Caught SimdJsonException: The input is not valid UTF-8
-Caught SimdJsonException: The input is not valid UTF-8
-Caught SimdJsonException: The input is not valid UTF-8
-Caught SimdJsonException: The input is not valid UTF-8
+Caught SimdJsonDecoderException: The input is not valid UTF-8
+Caught SimdJsonDecoderException: The input is not valid UTF-8
+Caught SimdJsonDecoderException: The input is not valid UTF-8
+Caught SimdJsonDecoderException: The input is not valid UTF-8
 Done
