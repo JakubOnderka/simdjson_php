@@ -251,6 +251,21 @@ function simdjson_is_valid(string $json, int $depth = 512): bool {}
 function simdjson_decode(string $json, bool $associative = false, int $depth = 512): mixed {}
 
 /**
+ * Takes a JSON encoded string and converts it into a PHP variable.
+ * Similar to json_decode()
+ *
+ * @param resource $res A file system pointer resource that is typically created using fopen().
+ * @param bool $associative When true, JSON objects will be returned as associative arrays.
+ *                          When false, JSON objects will be returned as objects.
+ * @param int $depth the maximum nesting depth of the structure being decoded.
+ * @return array|stdClass|string|float|int|bool|null
+ * @throws SimdJsonException for invalid JSON
+ *                           (or $json over 4GB long, or out of range integer/float)
+ * @throws ValueError for invalid $depth
+ */
+function simdjson_decode_from_stream($res, bool $associative = false, int $depth = 512): mixed {}
+
+/**
  * Returns the value at the json pointer $key
  *
  * @param string $json The JSON string being decoded

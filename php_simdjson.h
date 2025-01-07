@@ -166,6 +166,15 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(struct simdjson_p
  * If the returned error code is non-0, then return_value will not be initialized.
  */
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(struct simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth);
+
+/**
+ * Parses the given string into a return code. You have to be sure that the provided JSON contains simdjson::SIMDJSON_PADDING
+ *
+ * If the returned error code is 0, then return_value contains the parsed value.
+ * If the returned error code is non-0, then return_value will not be initialized.
+ */
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse_buffer(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth);
+
 /**
  * Parses the part of the given string at the json pointer 'key' into a PHP value at return_value
  *

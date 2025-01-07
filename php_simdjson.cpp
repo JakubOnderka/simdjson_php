@@ -110,9 +110,9 @@ PHP_FUNCTION(simdjson_validate) {
 }
 
 // Decode simple and common JSON values without allocating and using simdjson parser
-static zend_always_inline bool simdjson_simple_decode(zend_string *json, zval *return_value, bool associative) {
+static zend_always_inline bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative) {
     // Empty object
-    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '{' && ZSTR_VAL(json)[1] == '}') {
+    if (len == 2 && json[0] == '{' && json[1] == '}') {
         if (associative) {
             RETVAL_EMPTY_ARRAY();
         } else {
@@ -122,15 +122,15 @@ static zend_always_inline bool simdjson_simple_decode(zend_string *json, zval *r
     }
 
     // Empty array
-    if (ZSTR_LEN(json) == 2 && ZSTR_VAL(json)[0] == '[' && ZSTR_VAL(json)[1] == ']') {
+    if (len == 2 && json[0] == '[' && json[1] == ']') {
         RETVAL_EMPTY_ARRAY();
         return true;
     }
 
-    if (zend_string_equals_cstr(json, "true", 4)) {
+    if (len == 4 && memcmp(json, "true", 4) == 0) {
         RETVAL_TRUE;
         return true;
-    } else if (zend_string_equals_cstr(json, "false", 5)) {
+    } else if (len == 5 && memcmp(json, "false", 5) == 0) {
         RETVAL_FALSE;
         return true;
     }
@@ -153,7 +153,7 @@ PHP_FUNCTION(simdjson_decode) {
         RETURN_THROWS();
     }
 
-    if (simdjson_simple_decode(json, return_value, associative)) {
+    if (simdjson_simple_decode(ZSTR_VAL(json), ZSTR_LEN(json), return_value, associative)) {
         return;
     }
 
@@ -165,6 +165,109 @@ PHP_FUNCTION(simdjson_decode) {
         error = php_simdjson_parse(simdjson_php_parser, json, return_value, associative, depth);
         php_simdjson_free_parser(simdjson_php_parser);
     }
+
+    if (UNEXPECTED(error)) {
+        php_simdjson_throw_jsonexception(error);
+        RETURN_THROWS();
+    }
+}
+
+// Simplified version of _php_stream_copy_to_mem that allways allocated string with required padding and returns
+// char* instead of of zend_string* to avoid unnecessary overhead
+static char *simdjson_stream_copy_to_mem(php_stream *src, size_t *len) {
+    ssize_t ret = 0;
+    char *ptr;
+    size_t buflen;
+    int step = 8192;
+    int min_room = 8192 / 4;
+    php_stream_statbuf ssbuf;
+    char* result;
+
+    /* avoid many reallocs by allocating a good-sized chunk to begin with, if
+     * we can.  Note that the stream may be filtered, in which case the stat
+     * result may be inaccurate, as the filter may inflate or deflate the
+     * number of bytes that we can read.  In order to avoid an upsize followed
+     * by a downsize of the buffer, overestimate by the step size (which is
+     * 8K).  */
+    if (php_stream_stat(src, &ssbuf) == 0 && ssbuf.sb.st_size > 0) {
+        buflen = ZEND_MM_ALIGNED_SIZE(MAX(ssbuf.sb.st_size - src->position, 0)) + step;
+    } else {
+        buflen = step;
+    }
+
+    result = (char*) emalloc(buflen);
+    ptr = result;
+
+    while ((ret = php_stream_read(src, ptr, buflen - *len)) > 0) {
+        *len += ret;
+        if (*len + min_room >= buflen) {
+            buflen += step;
+            result = (char*) erealloc(result, buflen);
+            ptr = result + *len;
+        } else {
+            ptr += ret;
+        }
+    }
+
+    if (*len == 0) {
+        efree(result);
+        return NULL;
+    }
+
+    if (UNEXPECTED(*len + simdjson::SIMDJSON_PADDING > buflen)) {
+        result = (char*) erealloc(result, ZEND_MM_ALIGNED_SIZE(*len + simdjson::SIMDJSON_PADDING));
+    }
+
+#ifdef ZEND_DEBUG
+    // Set padding to zero to make valgrind happy
+    memset(ptr, 0, simdjson::SIMDJSON_PADDING);
+#endif
+
+    return result;
+}
+
+PHP_FUNCTION(simdjson_decode_from_stream) {
+    zval *res;
+    zend_bool associative = 0;
+    zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
+    php_stream *stream;
+    char *json;
+    size_t len = 0;
+
+    ZEND_PARSE_PARAMETERS_START(1, 3)
+        Z_PARAM_RESOURCE(res)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(associative)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
+    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
+    php_stream_from_res(stream, Z_RES_P(res));
+
+    if (!simdjson_validate_depth(depth, 3)) {
+        RETURN_THROWS();
+    }
+
+    if ((json = simdjson_stream_copy_to_mem(stream, &len)) == NULL) {
+        php_simdjson_throw_jsonexception(simdjson::EMPTY);
+        RETURN_THROWS();
+    }
+
+    if (simdjson_simple_decode(json, len, return_value, associative)) {
+        efree(json);
+        return;
+    }
+
+    simdjson_php_error_code error;
+    if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
+        error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), json, len, return_value, associative, depth);
+    } else {
+        simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+        error = php_simdjson_parse_buffer(simdjson_php_parser, json, len, return_value, associative, depth);
+        php_simdjson_free_parser(simdjson_php_parser);
+    }
+
+    efree(json);
 
     if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);

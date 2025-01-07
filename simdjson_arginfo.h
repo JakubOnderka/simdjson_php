@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 624d2d4e1af0511ae720cf22b96d8c9f26c83ada */
+ * Stub hash: 65cd153beeebfad02f16c62f153e0047135c3caa */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -10,6 +10,12 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_decode, 0, 1, IS_MIXED, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_decode_from_stream, 0, 1, IS_MIXED, 0)
+	ZEND_ARG_INFO(0, res)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
 ZEND_END_ARG_INFO()
@@ -67,6 +73,7 @@ ZEND_END_ARG_INFO()
 
 ZEND_FUNCTION(simdjson_validate);
 ZEND_FUNCTION(simdjson_decode);
+ZEND_FUNCTION(simdjson_decode_from_stream);
 ZEND_FUNCTION(simdjson_key_value);
 ZEND_FUNCTION(simdjson_key_count);
 ZEND_FUNCTION(simdjson_key_exists);
@@ -82,6 +89,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_validate, arginfo_simdjson_validate)
 	ZEND_FALIAS(simdjson_is_valid, simdjson_validate, arginfo_simdjson_is_valid)
 	ZEND_FE(simdjson_decode, arginfo_simdjson_decode)
+	ZEND_FE(simdjson_decode_from_stream, arginfo_simdjson_decode_from_stream)
 	ZEND_FE(simdjson_key_value, arginfo_simdjson_key_value)
 	ZEND_FE(simdjson_key_count, arginfo_simdjson_key_count)
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)

@@ -39,7 +39,7 @@ PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code erro
             // Remove error code name from message
             char* colon = strchr((char*)error_message, ':');
             if (colon == NULL) {
-              return error_message;
+                return error_message;
             }
             return colon + 2;
     }
@@ -549,6 +549,14 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser*
     SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
     return simdjson_convert_element(doc, return_value, associative, &parser->repeated_key_strings);
 }
+
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse_buffer(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth) /* {{{ */ {
+    simdjson::dom::element doc;
+
+    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, false, depth));
+    return simdjson_convert_element(doc, return_value, associative, &parser->repeated_key_strings);
+}
+
 /* }}} */
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, bool associative,
                               size_t depth) /* {{{ */ {
