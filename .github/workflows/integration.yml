@@ -111,4 +111,6 @@ jobs:
           make -j$(nproc)
 
       - name: Run tests
-        run: make test TESTS="--show-diff"
+        run: |
+          export SIMDJSON_HIGH_MEMORY_TESTS=1
+          make test TESTS="--show-diff"
