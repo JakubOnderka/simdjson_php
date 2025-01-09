@@ -73,12 +73,42 @@ static zend_always_inline zend_object* simdjson_init_object(zval *zv, uint32_t s
 }
 
 /** Init packed array with expected size */
-static zend_always_inline zend_array* simdjson_init_packed_array(zval *zv, uint32_t size) {
-    zend_array *arr;
-    array_init_size(zv, size);
-    arr = Z_ARR_P(zv);
-    zend_hash_real_init_packed(arr);
-    return arr;
+static zend_always_inline HashTable* simdjson_init_packed_array(zval *zv, uint32_t size) {
+    HashTable *ht;
+    void *data;
+
+    ht = zend_new_array(size);
+
+#if PHP_VERSION_ID >= 80200
+    // Can be replaced with zend_hash_real_init_packed, but this removes some unnecessary checks
+    if (EXPECTED(ht->nTableSize == HT_MIN_SIZE)) {
+        /* Use specialized API with constant allocation amount for a particularly common case. */
+        data = emalloc(HT_PACKED_SIZE_EX(HT_MIN_SIZE, HT_MIN_MASK));
+    } else {
+        data = emalloc(HT_PACKED_SIZE_EX(ht->nTableSize, HT_MIN_MASK));
+    }
+    HT_SET_DATA_ADDR(ht, data);
+    ht->u.v.flags = HASH_FLAG_PACKED | HASH_FLAG_STATIC_KEYS;
+    HT_HASH_RESET_PACKED(ht);
+#else
+    zend_hash_real_init_packed(ht);
+#endif
+
+    ZVAL_ARR(zv, ht);
+
+    return ht;
+}
+
+/** Initialize mixed array with exact size (in PHP terminology mixed array is hash) */
+static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_t size) {
+    HashTable *ht;
+
+    ht = zend_new_array(size);
+#if PHP_VERSION_ID >= 80200
+    zend_hash_real_init_mixed(ht); // Expect mixed array
+#endif
+    ZVAL_ARR(zv, ht);
+    return ht;
 }
 
 /** Check if it is necessary to reallocate string to buffer */
@@ -278,17 +308,6 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
 	}
 }
 #endif // PHP_VERSION_ID >= 80200
-
-// Initialize mixed array with exact size (in PHP terminology mixed array is hash)
-static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_t size) {
-    HashTable *ht;
-    array_init_size(zv, size);
-    ht = Z_ARR_P(zv);
-#if PHP_VERSION_ID >= 80200
-    zend_hash_real_init_mixed(ht); // Expect mixed array
-#endif
-    return ht;
-}
 
 static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value, HashTable *repeated_key_strings) {
 #if PHP_VERSION_ID >= 80200
