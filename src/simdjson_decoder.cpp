@@ -223,22 +223,22 @@ static zend_always_inline void simdjson_release_reused_key_strings(HashTable *de
     } while (++p != end);
 }
 
-static zend_always_inline void simdjson_init_reused_key_strings(HashTable *dedup_key_strings) {
-    if (UNEXPECTED(dedup_key_strings->nTableSize == 0)) {
-        // hash table is not initialized yet
-        zend_hash_init(dedup_key_strings, SIMDJSON_DEDUP_STRING_COUNT, NULL, NULL, 0);
+static zend_always_inline void simdjson_init_reused_key_strings(HashTable *ht) {
+    if (UNEXPECTED(ht->nTableSize == 0)) {
+        // zend_hash_init
+        ht->nNumUsed = 0;
+        ht->nTableSize = SIMDJSON_DEDUP_STRING_COUNT;
         // zend_hash_real_init_mixed
         void * data = emalloc(HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT)));
-        dedup_key_strings->nTableMask = HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
-        HT_SET_DATA_ADDR(dedup_key_strings, data);
-        HT_HASH_RESET(dedup_key_strings);
-    } else if (dedup_key_strings->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
+        ht->nTableMask = HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
+        HT_SET_DATA_ADDR(ht, data);
+        HT_HASH_RESET(ht);
+    } else if (ht->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
         // more than half of hash table is already full, cleanup
-        simdjson_release_reused_key_strings(dedup_key_strings);
-        ZEND_ASSERT(dedup_key_strings->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
-        HT_HASH_RESET(dedup_key_strings);
-        dedup_key_strings->nNumUsed = 0;
-        dedup_key_strings->nNumOfElements = 0;
+        simdjson_release_reused_key_strings(ht);
+        ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
+        HT_HASH_RESET(ht);
+        ht->nNumUsed = 0;
     }
 }
 
@@ -272,7 +272,6 @@ init_new_string:
         return key;
     } else {
         idx = ht->nNumUsed++;
-        ht->nNumOfElements++;
         p = ht->arData + idx;
         p->key = simdjson_string_init(str, len); // initialize new string for key
         GC_ADDREF(p->key); // raise gc counter by one, so it will be 2
