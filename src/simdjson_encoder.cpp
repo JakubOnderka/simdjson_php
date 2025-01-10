@@ -564,7 +564,7 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
 
 // Simplified version of php_next_utf8_char
 static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
-	if (!str_len >= 1)
+	if (str_len < 1)
 		return 1;
 
     /* We'll follow strategy 2. from section 3.6.1 of UTR #36:
@@ -576,7 +576,7 @@ static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_
     if (c < 0x80 || c < 0xc2) {
         return 1;
     } else if (c < 0xe0) {
-        if (!str_len >= 2)
+        if (str_len < 2)
             return 1;
 
         if (!utf8_trail(str[1])) {
