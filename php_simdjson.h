@@ -62,11 +62,16 @@ extern zend_module_entry simdjson_module_entry;
 #define SIMDJSON_SUPPORT_URL                  "https://github.com/JakubOnderka/simdjson_php"
 
 #define SIMDJSON_PARSE_DEFAULT_DEPTH          512
-
-/*
+/**
  * Number of strings in array of array or object keys that will be deduplicated
  */
-#define SIMDJSON_REPEATED_STRINGS_COUNT       128
+#define SIMDJSON_DEDUP_STRING_COUNT       256
+/**
+ * Maximum length of strings to be considered for deduplication.
+ * Longer strings are less likely to be duplicated and the memory overhead
+ * of storing them in the hash table might exceed the benefits.
+ */
+#define SIMDJSON_MAX_DEDUP_LENGTH             64
 
 /*
  * NOTE: Namespaces and references(&) are C++ only functionality.

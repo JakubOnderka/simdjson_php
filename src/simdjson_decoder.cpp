@@ -211,19 +211,34 @@ static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashT
 	return NULL;
 }
 
-static zend_always_inline void simdjson_init_reused_key_strings(HashTable *repeated_key_strings) {
-    if (UNEXPECTED(repeated_key_strings->nTableSize == 0)) { // array is not initialized yet
-        zend_hash_init(repeated_key_strings, SIMDJSON_REPEATED_STRINGS_COUNT, NULL, NULL, 0);
-        zend_hash_real_init_mixed(repeated_key_strings);
-    }
+static zend_always_inline void simdjson_release_reused_key_strings(HashTable *dedup_key_strings) {
+    ZEND_ASSERT(dedup_key_strings->nNumUsed > 0);
+    Bucket *p = dedup_key_strings->arData;
+    Bucket *end = p + dedup_key_strings->nNumUsed;
+    do {
+        if (GC_DELREF(p->key) == 0) {
+            ZEND_ASSERT(!(GC_FLAGS(p->key) & IS_STR_PERSISTENT));
+            efree(p->key);
+        }
+    } while (++p != end);
 }
 
-static zend_always_inline void simdjson_clean_reused_key_strings(HashTable *repeated_key_strings) {
-    ZEND_ASSERT(repeated_key_strings->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_REPEATED_STRINGS_COUNT));
-    if (repeated_key_strings->nNumUsed) {
-        HT_HASH_RESET(repeated_key_strings);
-        repeated_key_strings->nNumUsed = 0;
-        repeated_key_strings->nNumOfElements = 0;
+static zend_always_inline void simdjson_init_reused_key_strings(HashTable *dedup_key_strings) {
+    if (UNEXPECTED(dedup_key_strings->nTableSize == 0)) {
+        // hash table is not initialized yet
+        zend_hash_init(dedup_key_strings, SIMDJSON_DEDUP_STRING_COUNT, NULL, NULL, 0);
+        // zend_hash_real_init_mixed
+        void * data = emalloc(HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT)));
+        dedup_key_strings->nTableMask = HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
+        HT_SET_DATA_ADDR(dedup_key_strings, data);
+        HT_HASH_RESET(dedup_key_strings);
+    } else if (dedup_key_strings->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
+        // more than half of hash table is already full, cleanup
+        simdjson_release_reused_key_strings(dedup_key_strings);
+        ZEND_ASSERT(dedup_key_strings->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
+        HT_HASH_RESET(dedup_key_strings);
+        dedup_key_strings->nNumUsed = 0;
+        dedup_key_strings->nNumOfElements = 0;
     }
 }
 
@@ -232,21 +247,26 @@ static zend_always_inline void simdjson_clean_reused_key_strings(HashTable *repe
  * This method check if key was already used in same JSON document and returns a reference or allocate new string if
  * is unique
  */
-static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const char *str, size_t len, zend_ulong h) {
+static zend_always_inline zend_string* simdjson_dedup_key(HashTable *ht, const char *str, size_t len, zend_ulong h) {
     uint32_t nIndex;
     uint32_t idx;
     Bucket *p;
     zend_string *key;
 
+    if (len > SIMDJSON_MAX_DEDUP_LENGTH) {
+        goto init_new_string;
+    }
+
     // This should make computation faster, as we know array size
     ZEND_ASSERT(ht != NULL);
-    ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_REPEATED_STRINGS_COUNT));
+    ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
 
     p = simdjson_zend_hash_str_find_bucket(ht, str, len, h);
     if (p) { // Key already exists, reuse
         GC_ADDREF(p->key); // raise reference counter by one
         return p->key;
-    } else if (UNEXPECTED(ht->nNumUsed >= SIMDJSON_REPEATED_STRINGS_COUNT)) { // hashtable is full
+    } else if (UNEXPECTED(ht->nNumUsed >= SIMDJSON_DEDUP_STRING_COUNT)) { // hashtable is full
+init_new_string:
         key = simdjson_string_init(str, len); // always return new string if hashtable is full
         ZSTR_H(key) = h; // set hash to zend_string
         return key;
@@ -255,6 +275,7 @@ static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const c
         ht->nNumOfElements++;
         p = ht->arData + idx;
         p->key = simdjson_string_init(str, len); // initialize new string for key
+        GC_ADDREF(p->key); // raise gc counter by one, so it will be 2
         p->h = ZSTR_H(p->key) = h;
         //ZVAL_NULL(&p->val); // we dont need set value to null, as we don't use it and destructor is set to NULL
         nIndex = h | ht->nTableMask;
@@ -271,7 +292,7 @@ static zend_always_inline zend_string* simdjson_reuse_key(HashTable *ht, const c
  *  - initialized array as zend_hash_real_init_mixed
  *  - exact size must be known in advance
  */
-static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *repeated_key_strings) {
+static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *dedup_key_strings) {
     uint32_t nIndex;
     uint32_t idx;
     Bucket *p;
@@ -297,7 +318,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
         idx = ht->nNumUsed++;
         ht->nNumOfElements++;
         p = ht->arData + idx;
-        p->key = simdjson_reuse_key(repeated_key_strings, str, len, h); // initialize new string for key
+        p->key = simdjson_dedup_key(dedup_key_strings, str, len, h); // initialize new string for key
         //p->key = simdjson_string_init(str, len);
         p->h = /* ZSTR_H(p->key) =*/ h;
         HT_FLAGS(ht) &= ~HASH_FLAG_STATIC_KEYS;
@@ -309,7 +330,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
 }
 #endif // PHP_VERSION_ID >= 80200
 
-static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value, HashTable *repeated_key_strings) {
+static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const char *buf, size_t len, zval *value, HashTable *dedup_key_strings) {
 #if PHP_VERSION_ID >= 80200
     zend_ulong idx;
     if (UNEXPECTED(ZEND_HANDLE_NUMERIC_STR(buf, len, idx))) {
@@ -319,7 +340,7 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
         zend_string *key = len == 1 ? ZSTR_CHAR((unsigned char)buf[0]) : ZSTR_EMPTY_ALLOC();
         zend_hash_update(ht, key, value);
     } else {
-        simdjson_zend_hash_str_add_or_update(ht, buf, len, value, repeated_key_strings);
+        simdjson_zend_hash_str_add_or_update(ht, buf, len, value, dedup_key_strings);
     }
 #else
     if (len <= 1) {
@@ -347,7 +368,7 @@ static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, int64_t valu
     ZVAL_LONG(zv, value);
 }
 
-static void simdjson_create_array(simdjson::dom::element element, zval *return_value, HashTable *repeated_key_strings) {
+static void simdjson_create_array(simdjson::dom::element element, zval *return_value, HashTable *dedup_key_strings) {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -380,7 +401,7 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
                 zend_array *arr = simdjson_init_packed_array(return_value, 0xFFFFFF);
                 for (simdjson::dom::element child : json_array) {
              	   zval array_element;
-          	       simdjson_create_array(child, &array_element, repeated_key_strings);
+          	       simdjson_create_array(child, &array_element, dedup_key_strings);
          	       zend_hash_next_index_insert_new(arr, &array_element);
          	   }
                break;
@@ -391,14 +412,14 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
             /* Optimised variant of adding elements to array with known size available since PHP 8.2 */
             ZEND_HASH_FILL_PACKED(arr) {
                 for (simdjson::dom::element child : json_array) {
-                    simdjson_create_array(child, __fill_val, repeated_key_strings);
+                    simdjson_create_array(child, __fill_val, dedup_key_strings);
                     ZEND_HASH_FILL_NEXT();
                 }
             } ZEND_HASH_FILL_END();
 #else
             for (simdjson::dom::element child : json_array) {
                 zval array_element;
-                simdjson_create_array(child, &array_element, repeated_key_strings);
+                simdjson_create_array(child, &array_element, dedup_key_strings);
                 zend_hash_next_index_insert_new(arr, &array_element);
             }
 #endif
@@ -412,16 +433,12 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
                 break;
             }
 
-#if PHP_VERSION_ID >= 80200
-            // Allocate table for reusing already allocated keys
-            simdjson_init_reused_key_strings(repeated_key_strings);
-#endif
             HashTable *ht = simdjson_init_mixed_array(return_value, json_object.size());
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 zval array_element;
-                simdjson_create_array(field.value, &array_element, repeated_key_strings);
-                simdjson_add_key_to_symtable(ht, field.key.data(), field.key.size(), &array_element, repeated_key_strings);
+                simdjson_create_array(field.value, &array_element, dedup_key_strings);
+                simdjson_add_key_to_symtable(ht, field.key.data(), field.key.size(), &array_element, dedup_key_strings);
             }
             break;
         }
@@ -431,7 +448,7 @@ static void simdjson_create_array(simdjson::dom::element element, zval *return_v
 
 /* }}} */
 
-static simdjson_php_error_code simdjson_create_object(simdjson::dom::element element, zval *return_value, HashTable *repeated_key_strings) /* {{{ */ {
+static simdjson_php_error_code simdjson_create_object(simdjson::dom::element element, zval *return_value, HashTable *dedup_key_strings) /* {{{ */ {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
@@ -465,7 +482,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
 
             for (simdjson::dom::element child : json_array) {
                 zval value;
-                simdjson_php_error_code error = simdjson_create_object(child, &value, repeated_key_strings);
+                simdjson_php_error_code error = simdjson_create_object(child, &value, dedup_key_strings);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
@@ -478,10 +495,6 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
         case simdjson::dom::element_type::OBJECT : {
             const auto json_object = element.get_object().value_unsafe();
             zend_object *obj = simdjson_init_object(return_value, json_object.size());
-#if PHP_VERSION_ID >= 80200
-            // Allocate table for reusing already allocated keys
-            simdjson_init_reused_key_strings(repeated_key_strings);
-#endif
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
@@ -493,7 +506,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                     return SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY;
                 }
                 zval value;
-                simdjson_php_error_code error = simdjson_create_object(field.value, &value, repeated_key_strings);
+                simdjson_php_error_code error = simdjson_create_object(field.value, &value, dedup_key_strings);
                 if (UNEXPECTED(error)) {
                     zval_ptr_dtor(return_value);
                     ZVAL_NULL(return_value);
@@ -507,7 +520,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                 } else {
 #if PHP_VERSION_ID >= 80200
                     zend_ulong h = zend_inline_hash_func(data, size);
-                    key = simdjson_reuse_key(repeated_key_strings, data, size, h);
+                    key = simdjson_dedup_key(dedup_key_strings, data, size, h);
 #else
                     key = simdjson_string_init(data, size);
 #endif
@@ -530,27 +543,30 @@ PHP_SIMDJSON_API simdjson_php_parser* php_simdjson_create_parser(void) /* {{{ */
 }
 
 PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {{{ */ {
-    // Destroy repeated_key_strings hash if was allocated
-    if (parser->repeated_key_strings.nTableSize) {
-        efree(HT_GET_DATA_ADDR(&parser->repeated_key_strings));
+#if PHP_VERSION_ID >= 80200
+    // Destroy dedup_key_strings hash if was allocated
+    if (parser->dedup_key_strings.nTableSize) {
+        if (parser->dedup_key_strings.nNumUsed) {
+            simdjson_release_reused_key_strings(&parser->dedup_key_strings);
+        }
+        efree(HT_GET_DATA_ADDR(&parser->dedup_key_strings));
     }
+#endif
     delete parser;
 }
 
-static zend_always_inline simdjson_php_error_code simdjson_convert_element(simdjson::dom::element element, zval *return_value, bool associative, HashTable *repeated_key_strings)  {
+static simdjson_php_error_code simdjson_convert_element(simdjson::dom::element element, zval *return_value, bool associative, HashTable *dedup_key_strings)  {
+#if PHP_VERSION_ID >= 80200
+    // Allocate table for reusing already allocated keys
+    simdjson_init_reused_key_strings(dedup_key_strings);
+#endif
     simdjson_php_error_code resp;
     if (associative) {
-        simdjson_create_array(element, return_value, repeated_key_strings);
+        simdjson_create_array(element, return_value, dedup_key_strings);
         resp = simdjson::SUCCESS;
     } else {
-        resp = simdjson_create_object(element, return_value, repeated_key_strings);
+        resp = simdjson_create_object(element, return_value, dedup_key_strings);
     }
-#if PHP_VERSION_ID >= 80200
-    // Cleanup table if repeated_key_strings hashtable was initialized
-    if (repeated_key_strings->nTableSize != 0) {
-        simdjson_clean_reused_key_strings(repeated_key_strings);
-    }
-#endif
     return resp;
 }
 
@@ -566,14 +582,14 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser*
     simdjson::dom::element doc;
 
     SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
-    return simdjson_convert_element(doc, return_value, associative, &parser->repeated_key_strings);
+    return simdjson_convert_element(doc, return_value, associative, &parser->dedup_key_strings);
 }
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse_buffer(simdjson_php_parser* parser, const char *json, size_t len, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
 
     SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, json, len, false, depth));
-    return simdjson_convert_element(doc, return_value, associative, &parser->repeated_key_strings);
+    return simdjson_convert_element(doc, return_value, associative, &parser->dedup_key_strings);
 }
 
 /* }}} */
@@ -583,7 +599,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_par
     simdjson::dom::element element;
     SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
     SIMDJSON_PHP_TRY(get_key_with_optional_prefix(doc, key).get(element));
-    return simdjson_convert_element(element, return_value, associative, &parser->repeated_key_strings);
+    return simdjson_convert_element(element, return_value, associative, &parser->dedup_key_strings);
 }
 
 /* }}} */

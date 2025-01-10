@@ -22,7 +22,7 @@
 struct simdjson_php_parser {
 public:
     simdjson::dom::parser parser;
-    HashTable repeated_key_strings;
+    HashTable dedup_key_strings;
 };
 
 #endif
