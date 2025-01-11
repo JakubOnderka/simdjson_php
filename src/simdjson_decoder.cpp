@@ -192,7 +192,7 @@ static zend_always_inline void simdjson_set_zval_to_string(zval *v, const char *
 
 #if PHP_VERSION_ID >= 80200
 // Copy of PHP method zend_hash_str_find_bucket that is not exported without checking if p->key is not null
-static zend_always_inline Bucket *simdjson_zend_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h) {
+static zend_always_inline Bucket *simdjson_hash_str_find_bucket(const HashTable *ht, const char *str, size_t len, zend_ulong h) {
 	uint32_t nIndex;
 	uint32_t idx;
 	Bucket *p, *arData;
@@ -229,12 +229,13 @@ static zend_always_inline void simdjson_init_reused_key_strings(HashTable *ht) {
         ht->nNumUsed = 0;
         ht->nTableSize = SIMDJSON_DEDUP_STRING_COUNT;
         // zend_hash_real_init_mixed
-        void * data = emalloc(HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT)));
+        void *data = emalloc(HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT)));
         ht->nTableMask = HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
         HT_SET_DATA_ADDR(ht, data);
         HT_HASH_RESET(ht);
     } else if (ht->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
-        // more than half of hash table is already full, cleanup
+        // more than half of hash table is already full before decoding new structure, so we will make space for new keys
+        // by removing old keys
         simdjson_release_reused_key_strings(ht);
         ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
         HT_HASH_RESET(ht);
@@ -253,7 +254,7 @@ static zend_always_inline zend_string* simdjson_dedup_key(HashTable *ht, const c
     Bucket *p;
     zend_string *key;
 
-    if (len > SIMDJSON_MAX_DEDUP_LENGTH) {
+    if (UNEXPECTED(len > SIMDJSON_MAX_DEDUP_LENGTH)) {
         goto init_new_string;
     }
 
@@ -261,7 +262,7 @@ static zend_always_inline zend_string* simdjson_dedup_key(HashTable *ht, const c
     ZEND_ASSERT(ht != NULL);
     ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
 
-    p = simdjson_zend_hash_str_find_bucket(ht, str, len, h);
+    p = simdjson_hash_str_find_bucket(ht, str, len, h);
     if (p) { // Key already exists, reuse
         GC_ADDREF(p->key); // raise reference counter by one
         return p->key;
@@ -274,7 +275,7 @@ init_new_string:
         idx = ht->nNumUsed++;
         p = ht->arData + idx;
         p->key = simdjson_string_init(str, len); // initialize new string for key
-        GC_ADDREF(p->key); // raise gc counter by one, so it will be 2
+        GC_SET_REFCOUNT(p->key, 2);
         p->h = ZSTR_H(p->key) = h;
         //ZVAL_NULL(&p->val); // we dont need set value to null, as we don't use it and destructor is set to NULL
         nIndex = h | ht->nTableMask;
@@ -291,7 +292,7 @@ init_new_string:
  *  - initialized array as zend_hash_real_init_mixed
  *  - exact size must be known in advance
  */
-static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *dedup_key_strings) {
+static zend_always_inline void simdjson_hash_str_add_or_update(HashTable *ht, const char *str, size_t len, zval *pData, HashTable *dedup_key_strings) {
     uint32_t nIndex;
     uint32_t idx;
     Bucket *p;
@@ -306,7 +307,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
     // Compute key hash
     h = zend_inline_hash_func(str, len);
 
-    p = simdjson_zend_hash_str_find_bucket(ht, str, len, h);
+    p = simdjson_hash_str_find_bucket(ht, str, len, h);
     if (UNEXPECTED(p)) { // Key already exists, replace value
         zval *data;
         ZEND_ASSERT(&p->val != pData);
@@ -318,8 +319,7 @@ static zend_always_inline void simdjson_zend_hash_str_add_or_update(HashTable *h
         ht->nNumOfElements++;
         p = ht->arData + idx;
         p->key = simdjson_dedup_key(dedup_key_strings, str, len, h); // initialize new string for key
-        //p->key = simdjson_string_init(str, len);
-        p->h = /* ZSTR_H(p->key) =*/ h;
+        p->h = h;
         HT_FLAGS(ht) &= ~HASH_FLAG_STATIC_KEYS;
         ZVAL_COPY_VALUE(&p->val, pData);
         nIndex = h | ht->nTableMask;
@@ -333,13 +333,14 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
 #if PHP_VERSION_ID >= 80200
     zend_ulong idx;
     if (UNEXPECTED(ZEND_HANDLE_NUMERIC_STR(buf, len, idx))) {
-        zend_hash_index_update(ht, idx, value); // if index is inter in string format, use integer as index
+        // if index is inter in string format, use integer as index
+        zend_hash_index_update(ht, idx, value);
     } else if (UNEXPECTED(len <= 1)) {
         // Use interned string
         zend_string *key = len == 1 ? ZSTR_CHAR((unsigned char)buf[0]) : ZSTR_EMPTY_ALLOC();
         zend_hash_update(ht, key, value);
     } else {
-        simdjson_zend_hash_str_add_or_update(ht, buf, len, value, dedup_key_strings);
+        simdjson_hash_str_add_or_update(ht, buf, len, value, dedup_key_strings);
     }
 #else
     if (len <= 1) {
