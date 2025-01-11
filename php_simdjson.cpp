@@ -465,30 +465,30 @@ static zend_always_inline bool simdjson_validate_encode_depth(const zend_long de
 
 #if PHP_VERSION_ID >= 80200
 /** For simple types we can just return direct interned string without allocating new strings */
-static zend_always_inline bool simdjson_encode_simple(const zval *parameter, zval *return_value, zend_long options) {
+static zend_always_inline bool simdjson_encode_simple(const zval *parameter, zval *return_value) {
     switch (Z_TYPE_P(parameter)) {
         case IS_NULL:
-            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_NULL_LOWERCASE));
+            RETVAL_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_NULL_LOWERCASE));
             return true;
 
         case IS_TRUE:
-            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_TRUE));
+            RETVAL_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_TRUE));
             return true;
 
         case IS_FALSE:
-            RETVAL_STR(ZSTR_KNOWN(ZEND_STR_FALSE));
+            RETVAL_INTERNED_STR(ZSTR_KNOWN(ZEND_STR_FALSE));
             return true;
 
         case IS_LONG:
             if (Z_LVAL_P(parameter) >= 0 && Z_LVAL_P(parameter) < 10) {
-                RETVAL_STR(ZSTR_CHAR((unsigned char) '0' + Z_LVAL_P(parameter)));
+                RETVAL_INTERNED_STR(ZSTR_CHAR((unsigned char) '0' + Z_LVAL_P(parameter)));
                 return true;
             }
             break;
 
         case IS_ARRAY:
             if (zend_hash_num_elements(Z_ARRVAL_P(parameter)) == 0) {
-                RETVAL_STR(simdjson_json_empty_array);
+                RETVAL_INTERNED_STR(simdjson_json_empty_array);
                 return true;
             }
             break;
@@ -517,7 +517,7 @@ PHP_FUNCTION(simdjson_encode) {
     }
 
 #if PHP_VERSION_ID >= 80200
-    if (!(options & SIMDJSON_APPEND_NEWLINE) && simdjson_encode_simple(parameter, return_value, options)) {
+    if (!(options & SIMDJSON_APPEND_NEWLINE) && simdjson_encode_simple(parameter, return_value)) {
         return;
     }
 #endif
