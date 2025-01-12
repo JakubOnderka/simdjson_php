@@ -1,49 +1,50 @@
 # simdjson_php
 
-🚀 Super fast JSON encoding and decoding for PHP that utilise [simdjson project](https://github.com/lemire/simdjson).
+🚀 Blazing-fast JSON encoding and decoding for PHP, powered by the [simdjson project](https://github.com/lemire/simdjson).
 
 *This is a fork of [crazyxman/simdjson_php](https://github.com/crazyxman/simdjson_php) with new optimisations and encoding support.*
 
 [![Build Status](https://github.com/JakubOnderka/simdjson_php/actions/workflows/integration.yml/badge.svg?branch=master)](https://github.com/JakubOnderka/simdjson_php/actions/workflows/integration.yml?query=branch%3Amaster)
 
-## How fast is simdjson_php?
+## Performance Comparison: How Fast is simdjson_php?
 
-* Decoding is 3× faster compared to PHP's `json_decode()`
-* Encoding is 2.5× faster compared to PHP's `json_encode()`
-* Validation is 6× faster compared to PHP's `json_validate()`
+| Operation             | PHP Built-in | simdjson_php | Speedup  |
+|-----------------------|--------------|--------------|----------|
+| Decode to array       | 1.48 ms      | 0.49 ms      | **3.0×** |
+| Decode to object      | 1.59 ms      | 0.69 ms      | **2.3×** |
+| Encode                | 0.67 ms      | 0.26 ms      | **2.5×** |
+| Encode (pretty print) | 0.83 ms      | 0.31 ms      | **2.6×** |
+| Validate              | 1.37 ms      | 0.22 ms      | **6.2×** |
 
-| Method              | Original | simdjson_php | Speedup  |
-|---------------------|----------|--------------|----------|
-| Decode to array     | 1.48 ms  | 0.49 ms      | **3.0×** |
-| Decode to object    | 1.59 ms  | 0.69 ms      | **2.3×** |
-| Encode              | 0.67 ms  | 0.26 ms      | **2.5×** |
-| Encode pretty print | 0.83 ms  | 0.31 ms      | **2.6×** |
-| Validate            | 1.37 ms  | 0.22 ms      | **6.2×** |
+Tests were conducted using PHP 8.3 on an [Apple M1 Max](https://en.wikipedia.org/wiki/Apple_M1#M1_Pro_and_M1_Max). For test specification see `TwitterDecodeBench.php` and `TwitterEncoderBench.php`.
 
-Using PHP 8.3 on [Apple M1 Max](https://en.wikipedia.org/wiki/Apple_M1#M1_Pro_and_M1_Max), for test specification see `TwitterDecodeBench.php` and `TwitterEncoderBench.php`.
-Memory usage is also reduced when decoding JSON compared to `json_decode()`, as array keys are deduplicated. When decoding [`twitter.json`](jsonexamples/twitter.json), memory usage decrees from 3.01 MB to 2.47 MB.
+Additionally, simdjson_php reduces memory usage compared to `json_decode()`. For example, when decoding twitter.json, memory consumption drops from 3.01 MB to 2.47 MB due to efficient array key deduplication.
 
 ## Requirement
 
-- PHP 8.0+ (PHP 8.2+ recommended for maximum performance)
-- Prerequisites: g++ (version 7 or better) or clang++ (version 6 or better), and a 64-bit system with a command-line shell (e.g., Linux, macOS, FreeBSD).
+* PHP 8.0+ (PHP 8.2+ recommended for maximum performance)
+* g++ (version 7 or better) or clang++ (version 6 or better)
+* A 64-bit system with a command-line shell (e.g., Linux, macOS, FreeBSD)
 
-## Compile simdjson_php in Linux
-```
-$ phpize
-$ ./configure
-$ make
-$ make test
-$ make install
+## Compilation Instructions for Linux
+
+To compile simdjson_php, run the following commands:
+
+```bash
+phpize
+./configure
+make
+make test
+make install
 ```
 
-Add the following line to your php.ini
+Once installed, add this line to your `php.ini` file:
 
-```
+```ini
 extension=simdjson.so
 ```
 
-## Usage
+## Usage Examples
 ```php
 $jsonString = <<<'JSON'
 {
@@ -66,7 +67,7 @@ JSON;
 $isValid = simdjson_validate($jsonString); //return bool
 var_dump($isValid);  // true
 
-// Parsing a JSON string. similar to the json_decode() function but without the fourth argument
+// Parsing a JSON string. Similar to the json_decode() function but without the fourth argument
 try {
     // returns array|stdClass|string|float|int|bool|null.
     $parsedJSON = simdjson_decode($jsonString, true, 512);
@@ -110,18 +111,18 @@ var_dump($res) //int(5)
 
 Most of available options of default `json_encode()` method are not supported by `simdjson_encode()` as they are usually useless.
 
-`simdjson_encode($value)` method has very similar behaviour as `json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)`
+`simdjson_encode($value)` method has similar behaviour as `json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)`
 
 Supported options are:
-* `SIMDJSON_PRETTY_PRINT` - use whitespace in returned data to format it.
+* `SIMDJSON_PRETTY_PRINT` - use whitespace in returned data to format it
 * `SIMDJSON_INVALID_UTF8_SUBSTITUTE` - convert invalid UTF-8 characters to `\0xfffd` (Unicode Character 'REPLACEMENT CHARACTER' �)
 * `SIMDJSON_INVALID_UTF8_IGNORE` - ignore invalid UTF-8 characters
-* `SIMDJSON_APPEND_NEWLINE` - append new line character (`\n`) to end of encoded string. This is useful when encoding multiple objects to JSONL format as PHP strigns are immutable.
+* `SIMDJSON_APPEND_NEWLINE` - append new line character (`\n`) to end of encoded string. This is useful when encoding data to JSONL format as PHP strings are immutable.
 
 Differences are:
 * uses different algorithm to convert floating-point number to string, so string format can be slightly different
 * even when `JSON_UNESCAPED_UNICODE` is enabled, PHP `json_encode()` escapes some Unicode chars that do not need to be escaped. `simdjson_encode()` escape just Unicode chars that needs to be escaped by JSON spec.
-* `simdjson_encode_to_stream()` method allows you to write encoded string directly to PHP stream
+* simdjson will throw `SimdJsonEncoderException` exception in case of error
 
 ### Base64 encoding
 
@@ -135,9 +136,19 @@ $fileContentEncoded = new SimdJsonBase64Encode($fileContent);
 simdjson_encode(['image' => $fileContentEncoded]); // returns {"image":"TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu..."}
 ```
 
-## Decoder edge cases
+### Encode to stream
 
-There are some differences from `json_decode()` due to the implementation of the underlying simdjson library. This will throw a RuntimeException if simdjson rejects the JSON.
+For large data sets, simdjson_php provides the `simdjson_encode_to_stream()` function to save data directly to a file or output buffer.
+
+```php
+$bigStructure = [...];
+simdjson_encode_to_stream($bigStructure, fopen("file.json", "w")); // save to file.json
+simdjson_encode_to_stream($bigStructure, fopen("php://output", "w")); // send to output buffer
+```
+
+## Decoder
+
+There are some differences from `json_decode()` due to the implementation of the underlying simdjson library. This will throw a `SimdJsonDecoderException` if simdjson rejects the JSON.
 
 Note that the simdjson PECL is using a fork of the simdjson C library to imitate php's handling of integers and floats in JSON.
 
@@ -149,6 +160,15 @@ Note that the simdjson PECL is using a fork of the simdjson C library to imitate
    In `simdjson_decode`, an array with a scalar is one level deeper than an array with no elements.
    For typical use cases, this shouldn't matter.
    (e.g. `simdjson_decode('[[]]', true, 2)` will succeed but `json_decode('[[]]', true, 2)` and `simdjson_decode('[[1]]', true, 2)` will fail.)
+
+### Decode from stream
+
+If you need to decode a big file from JSON format that you want to save to a file or send to a user, you can use the `simdjson_decode_from_stream` method.
+
+```php
+simdjson_decode_from_stream(fopen("file.json", "r")); // load from file.json
+simdjson_decode_from_stream(fopen("php://input", "r")); // send by user
+```
 
 ## Benchmarks
 See the [benchmark](./benchmark) folder for more benchmarks.
