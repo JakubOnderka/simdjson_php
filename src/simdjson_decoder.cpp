@@ -211,10 +211,10 @@ static zend_always_inline Bucket *simdjson_hash_str_find_bucket(const HashTable 
 	return NULL;
 }
 
-static zend_always_inline void simdjson_release_reused_key_strings(HashTable *dedup_key_strings) {
-    ZEND_ASSERT(dedup_key_strings->nNumUsed > 0);
-    Bucket *p = dedup_key_strings->arData;
-    Bucket *end = p + dedup_key_strings->nNumUsed;
+static zend_always_inline void simdjson_dedup_key_strings_release(HashTable *ht) {
+    ZEND_ASSERT(ht->nNumUsed > 0);
+    Bucket *p = ht->arData;
+    Bucket *end = p + ht->nNumUsed;
     do {
         if (GC_DELREF(p->key) == 0) {
             ZEND_ASSERT(!(GC_FLAGS(p->key) & IS_STR_PERSISTENT));
@@ -223,7 +223,7 @@ static zend_always_inline void simdjson_release_reused_key_strings(HashTable *de
     } while (++p != end);
 }
 
-static zend_always_inline void simdjson_init_reused_key_strings(HashTable *ht) {
+static zend_always_inline void simdjson_dedup_key_strings_init(HashTable *ht) {
     if (UNEXPECTED(ht->nTableSize == 0)) {
         // zend_hash_init
         ht->nNumUsed = 0;
@@ -236,7 +236,7 @@ static zend_always_inline void simdjson_init_reused_key_strings(HashTable *ht) {
     } else if (ht->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
         // more than half of hash table is already full before decoding new structure, so we will make space for new keys
         // by removing old keys
-        simdjson_release_reused_key_strings(ht);
+        simdjson_dedup_key_strings_release(ht);
         ZEND_ASSERT(ht->nTableMask == HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT));
         HT_HASH_RESET(ht);
         ht->nNumUsed = 0;
@@ -547,7 +547,7 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
     // Destroy dedup_key_strings hash if was allocated
     if (parser->dedup_key_strings.nTableSize) {
         if (parser->dedup_key_strings.nNumUsed) {
-            simdjson_release_reused_key_strings(&parser->dedup_key_strings);
+            simdjson_dedup_key_strings_release(&parser->dedup_key_strings);
         }
         efree(HT_GET_DATA_ADDR(&parser->dedup_key_strings));
     }
@@ -558,7 +558,7 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
 static simdjson_php_error_code simdjson_convert_element(simdjson::dom::element element, zval *return_value, bool associative, HashTable *dedup_key_strings)  {
 #if PHP_VERSION_ID >= 80200
     // Allocate table for reusing already allocated keys
-    simdjson_init_reused_key_strings(dedup_key_strings);
+    simdjson_dedup_key_strings_init(dedup_key_strings);
 #endif
     simdjson_php_error_code resp;
     if (associative) {
