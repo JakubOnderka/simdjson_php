@@ -105,7 +105,17 @@ static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_
 
     ht = zend_new_array(size);
 #if PHP_VERSION_ID >= 80200
-    zend_hash_real_init_mixed(ht); // Expect mixed array
+    // zend_hash_real_init_mixed without unnecessary checks
+    void *data;
+    uint32_t nSize = ht->nTableSize;
+
+    ZEND_ASSERT(HT_SIZE_TO_MASK(nSize));
+
+    data = emalloc(HT_SIZE_EX(nSize, HT_SIZE_TO_MASK(nSize)));
+    ht->nTableMask = HT_SIZE_TO_MASK(nSize);
+    HT_SET_DATA_ADDR(ht, data);
+    HT_FLAGS(ht) = HASH_FLAG_STATIC_KEYS;
+    HT_HASH_RESET(ht);
 #endif
     ZVAL_ARR(zv, ht);
     return ht;
