@@ -640,7 +640,7 @@ PHP_MINIT_FUNCTION (simdjson) {
 #if PHP_VERSION_ID >= 80200
     SIMDJSON_NEW_INTERNED_STRING(simdjson_json_empty_array, "[]");
 #endif
-    SIMDJSON_NEW_INTERNED_STRING(simdjson_json_serialize, "jsonSerialize");
+    SIMDJSON_NEW_INTERNED_STRING(simdjson_json_serialize, "jsonserialize");
 
     auto simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
 	simdjson_decoder_exception_ce = register_class_SimdJsonDecoderException(simdjson_exception_ce);
