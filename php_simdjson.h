@@ -117,6 +117,8 @@ extern PHP_SIMDJSON_API zend_class_entry *simdjson_decoder_exception_ce;
 extern PHP_SIMDJSON_API zend_class_entry *simdjson_encoder_exception_ce;
 extern PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
+extern zend_string *simdjson_json_serialize;
+
 /**
  * NOTE: Namespaces and references(&) and classes (instead of structs) are C++ only functionality.
  *

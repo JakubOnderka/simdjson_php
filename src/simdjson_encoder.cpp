@@ -748,13 +748,12 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	SIMDJSON_HASH_PROTECT_RECURSION(myht);
 #endif
 
-	ZVAL_STRING(&fname, "jsonSerialize");
+	ZVAL_INTERNED_STR(&fname, simdjson_json_serialize); // jsonSerialize
 
 	if (FAILURE == call_user_function(NULL, val, &fname, &retval, 0, NULL) || Z_TYPE(retval) == IS_UNDEF) {
 		if (!EG(exception)) {
 			zend_throw_exception_ex(NULL, 0, "Failed calling %s::jsonSerialize()", ZSTR_VAL(ce->name));
 		}
-		zval_ptr_dtor(&fname);
 #if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
 #else
@@ -766,7 +765,6 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	if (EG(exception)) {
 		/* Error already raised */
 		zval_ptr_dtor(&retval);
-		zval_ptr_dtor(&fname);
 #if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
 #else
@@ -795,7 +793,6 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	}
 
 	zval_ptr_dtor(&retval);
-	zval_ptr_dtor(&fname);
 
 	return return_code;
 }

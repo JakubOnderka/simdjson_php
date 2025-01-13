@@ -47,6 +47,7 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 #include "simdjson_arginfo.h"
 
 static zend_string *simdjson_json_empty_array;
+zend_string *simdjson_json_serialize;
 
 ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
@@ -617,19 +618,23 @@ PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
 */
 PHP_GINIT_FUNCTION (simdjson) {
 #if defined(COMPILE_DL_SIMDJSON) && defined(ZTS)
-ZEND_TSRMLS_CACHE_UPDATE();
+    ZEND_TSRMLS_CACHE_UPDATE();
 #endif
 }
 /* }}} */
+
+#define SIMDJSON_NEW_INTERNED_STRING(_dest, _string) do { \
+    _dest = zend_string_init_interned(_string, strlen(_string), 1); \
+    GC_ADD_FLAGS(_dest, IS_STR_VALID_UTF8); \
+} while(0); \
 
 /** {{{ PHP_MINIT_FUNCTION
 */
 PHP_MINIT_FUNCTION (simdjson) {
 #if PHP_VERSION_ID >= 80200
-    // Interned string for empty array
-    simdjson_json_empty_array = zend_new_interned_string(zend_string_init("[]", 2, 1));
-    GC_ADD_FLAGS(simdjson_json_empty_array, IS_STR_VALID_UTF8);
+    SIMDJSON_NEW_INTERNED_STRING(simdjson_json_empty_array, "[]");
 #endif
+    SIMDJSON_NEW_INTERNED_STRING(simdjson_json_serialize, "jsonSerialize");
 
     auto simdjson_exception_ce = register_class_SimdJsonException(spl_ce_RuntimeException);
 	simdjson_decoder_exception_ce = register_class_SimdJsonDecoderException(simdjson_exception_ce);
