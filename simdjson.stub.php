@@ -364,11 +364,13 @@ class SimdJsonEncoderException extends SimdJsonException {}
  */
 final class SimdJsonBase64Encode implements JsonSerializable {
     private string $string;
+    private bool $base64url = false;
 
     /**
      * @param string $string The data to encode.
+     * @param bool $base64url When true, use base64url encoding (RFC 4648 §5).
      */
-    public function __construct(string $string) {}
+    public function __construct(string $string, bool $base64url = false) {}
 
     /**
      * @return mixed Base64 encoded string

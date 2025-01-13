@@ -136,6 +136,8 @@ $fileContentEncoded = new SimdJsonBase64Encode($fileContent);
 simdjson_encode(['image' => $fileContentEncoded]); // returns {"image":"TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu..."}
 ```
 
+You can also use base64url encoding (RFC 4648 §5) by setting second argument to true: `new SimdJsonBase64Encode($fileContent, true);`
+
 ### Encode to stream
 
 For large data sets, simdjson_php provides the `simdjson_encode_to_stream()` function to save data directly to a file or output buffer.

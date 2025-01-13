@@ -709,14 +709,16 @@ static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simd
 }
 
 static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
-    zend_string *binary_string = Z_STR(Z_OBJ_P(val)->properties_table[0]);
+    zend_string *binary_string = Z_STR_P(OBJ_PROP_NUM(Z_OBJ_P(val), 0));
+    bool base64_url = Z_TYPE_INFO_P(OBJ_PROP_NUM(Z_OBJ_P(val), 1)) == IS_TRUE;
+    auto options = base64_url ? simdutf::base64_url : simdutf::base64_default;
 
     // As we are sure that base64 encoded string is always valid UTF-8 and do not contain any char that need to be
     // escaped, so we can skip all checks and just directly copy encoded string to output buffer
-    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string));
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string), options);
     char* output = simdjson_smart_str_extend(buf, encoded_length + 2);
     *output++ = '"';
-    simdutf::binary_to_base64(ZSTR_VAL(binary_string), ZSTR_LEN(binary_string), output);
+    simdutf::binary_to_base64(ZSTR_VAL(binary_string), ZSTR_LEN(binary_string), output, options);
     output += encoded_length;
     *output = '"';
 }

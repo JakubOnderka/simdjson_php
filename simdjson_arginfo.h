@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 5b2147fe5e6865e7ab51e22a21cb235aeba0a12e */
+ * Stub hash: 21c3b21c513b1ce2b8c72912856cd6d7326dbfe5 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -62,6 +62,7 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_SimdJsonBase64Encode___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, base64url, _IS_BOOL, 0, "false")
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonBase64Encode_jsonSerialize, 0, 0, IS_MIXED, 0)
@@ -215,6 +216,12 @@ static zend_class_entry *register_class_SimdJsonBase64Encode(zend_class_entry *c
 	zend_string *property_string_name = zend_string_init("string", sizeof("string") - 1, 1);
 	zend_declare_typed_property(class_entry, property_string_name, &property_string_default_value, ZEND_ACC_PRIVATE, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_STRING));
 	zend_string_release(property_string_name);
+
+	zval property_base64url_default_value;
+	ZVAL_FALSE(&property_base64url_default_value);
+	zend_string *property_base64url_name = zend_string_init("base64url", sizeof("base64url") - 1, 1);
+	zend_declare_typed_property(class_entry, property_base64url_name, &property_base64url_default_value, ZEND_ACC_PRIVATE, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_BOOL));
+	zend_string_release(property_base64url_name);
 
 	return class_entry;
 }
