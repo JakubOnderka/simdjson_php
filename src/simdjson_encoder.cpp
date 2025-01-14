@@ -725,11 +725,11 @@ static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
 
 static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
 	zend_class_entry *ce = Z_OBJCE_P(val);
+	zend_object *obj = Z_OBJ_P(val);
 	zval retval;
 	zend_result return_code;
 
 #if PHP_VERSION_ID >= 80300
-	zend_object *obj = Z_OBJ_P(val);
 	uint32_t *guard = zend_get_recursion_guard(obj);
 	ZEND_ASSERT(guard != NULL);
 
@@ -752,7 +752,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 
     zend_function *json_serialize_method = (zend_function*)zend_hash_find_ex_ptr(&ce->function_table, simdjson_json_serialize, 1);
     ZEND_ASSERT(json_serialize_method != NULL && "This should be guaranteed prior to calling this function");
-    zend_call_known_instance_method_with_0_params(json_serialize_method, Z_OBJ_P(val), &retval);
+    zend_call_known_instance_method_with_0_params(json_serialize_method, obj, &retval);
     /* An exception has occurred */
     if (Z_TYPE(retval) == IS_UNDEF) {
 #if PHP_VERSION_ID >= 80300
@@ -763,8 +763,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 		return FAILURE;
 	}
 
-	/* An exception has occurred */
-    if (Z_TYPE(retval) == IS_OBJECT && Z_OBJ(retval) == Z_OBJ_P(val)) {
+    if (Z_TYPE(retval) == IS_OBJECT && Z_OBJ(retval) == obj) {
 		/* Handle the case where jsonSerialize does: return $this; by going straight to encode array */
 #if PHP_VERSION_ID >= 80300
 		ZEND_GUARD_UNPROTECT_RECURSION(guard, JSON);
