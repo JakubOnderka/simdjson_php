@@ -312,7 +312,7 @@ static zend_always_inline void simdjson_hash_str_add_or_update(HashTable *ht, co
     zend_ulong h;
 
     // Check if array is initialized with proper flags and size
-    // These checks are removed in production code
+    // Note: These assertions are automatically removed in production builds
     ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_UNINITIALIZED)); // make sure that hashtable was initialized
     ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_PACKED)); // make sure that hashtable is not packed
     ZEND_ASSERT(ht->nNumUsed < ht->nTableSize); // make sure that we still have space for new elements
@@ -370,6 +370,38 @@ static zend_always_inline void simdjson_add_key_to_symtable(HashTable *ht, const
     /* Release the reference counted key */
     zend_string_release_ex(key, 0);
 #endif // PHP_VERSION_ID >= 80200
+}
+
+/**
+  * Optimized function for adding keys to objects with built-in memory management.
+  * - Uses interned strings for keys <= 1 byte to reduce memory allocation
+  * - Implements version-specific optimizations for PHP 8.3+ and 8.2+
+  * - Handles string deduplication for short keys
+  */
+static zend_always_inline void simdjson_add_key_to_object(HashTable *ht, const char *str, size_t len, zval *value, HashTable *dedup_key_strings) {
+#if PHP_VERSION_ID >= 80300 // see simdjson_init_object
+    if (UNEXPECTED(len <= 1)) {
+        // Use interned string
+        zend_string *key = len == 1 ? ZSTR_CHAR((unsigned char)str[0]) : ZSTR_EMPTY_ALLOC();
+        zend_hash_update(ht, key, value);
+    } else {
+        simdjson_hash_str_add_or_update(ht, str, len, value, dedup_key_strings);
+    }
+#else
+    zend_string *key;
+    if (UNEXPECTED(len <= 1)) {
+        key = len == 1 ? ZSTR_CHAR((unsigned char)str[0]) : ZSTR_EMPTY_ALLOC();
+    } else {
+#if PHP_VERSION_ID >= 80200
+        zend_ulong h = zend_inline_hash_func(str, len);
+        key = simdjson_dedup_key(dedup_key_strings, str, len, h);
+#else
+        key = simdjson_string_init(str, len);
+#endif // PHP_VERSION_ID >= 80200
+    }
+    zend_hash_update(ht, key, value);
+    zend_string_release_ex(key, 0);
+#endif // PHP_VERSION_ID >= 80300
 }
 
 static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, int64_t value) {
@@ -509,6 +541,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
         case simdjson::dom::element_type::OBJECT : {
             const auto json_object = element.get_object().value_unsafe();
             zend_object *obj = simdjson_init_object(return_value, json_object.size());
+            HashTable *ht = zend_std_get_properties(obj);
 
             for (simdjson::dom::key_value_pair field : json_object) {
                 const char *data = field.key.data();
@@ -527,21 +560,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                     return error;
                 }
 
-                /* Add the key to the object */
-                zend_string *key;
-                if (UNEXPECTED(size <= 1)) {
-                    key = size == 1 ? ZSTR_CHAR((unsigned char)data[0]) : ZSTR_EMPTY_ALLOC();
-                } else {
-#if PHP_VERSION_ID >= 80200
-                    zend_ulong h = zend_inline_hash_func(data, size);
-                    key = simdjson_dedup_key(dedup_key_strings, data, size, h);
-#else
-                    key = simdjson_string_init(data, size);
-#endif
-                }
-
-                zend_hash_update(zend_std_get_properties(obj), key, &value);
-                zend_string_release_ex(key, 0);
+                simdjson_add_key_to_object(ht, data, size, &value, dedup_key_strings);
             }
             break;
         }

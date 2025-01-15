@@ -10,8 +10,8 @@
 
 | Operation             | PHP Built-in | simdjson_php | Speedup  |
 |-----------------------|--------------|--------------|----------|
-| Decode to array       | 1.48 ms      | 0.49 ms      | **3.0×** |
-| Decode to object      | 1.59 ms      | 0.69 ms      | **2.3×** |
+| Decode to array       | 1.48 ms      | 0.46 ms      | **3.2×** |
+| Decode to object      | 1.56 ms      | 0.54 ms      | **2.9×** |
 | Encode                | 0.67 ms      | 0.26 ms      | **2.5×** |
 | Encode (pretty print) | 0.83 ms      | 0.31 ms      | **2.6×** |
 | Validate              | 1.37 ms      | 0.22 ms      | **6.2×** |
