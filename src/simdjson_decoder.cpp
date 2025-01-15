@@ -60,11 +60,17 @@ get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_
 // Initialize stdClass object and return pointer to propertires HashTable
 static zend_always_inline HashTable* simdjson_init_object(zval *zv, uint32_t size) {
 #if PHP_VERSION_ID >= 80300
-    size_t properties_size = zend_object_properties_size(zend_standard_class_def);
+    ZEND_ASSERT(zend_standard_class_def->default_properties_count == 0);
+
+    // Allocate stdClass object
+    ssize_t properties_size = (ssize_t)zend_object_properties_size(zend_standard_class_def);
     ZEND_ASSERT(properties_size == -16);
-    zend_object *object = (zend_object*)emalloc(sizeof(zend_object) - properties_size);
+    zend_object *object = (zend_object*)emalloc(sizeof(zend_object) + properties_size);
+
+    // Initialize object
     zend_object_std_init(object, zend_standard_class_def);
-    // Initialize properties array to expected size
+
+    // Initialize properties HashTable to expected size
     object->properties = zend_new_array(size);
     zend_hash_real_init_mixed(object->properties);
     ZVAL_OBJ(zv, object);
