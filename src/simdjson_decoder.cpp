@@ -213,6 +213,7 @@ static zend_always_inline Bucket *simdjson_hash_str_find_bucket(const HashTable 
 	while (idx != HT_INVALID_IDX) {
 		ZEND_ASSERT(idx < HT_IDX_TO_HASH(ht->nTableSize));
 		p = HT_HASH_TO_BUCKET_EX(arData, idx);
+		ZEND_ASSERT(p->key != NULL);
 		if (p->h == h && zend_string_equals_cstr(p->key, str, len)) {
 			return p;
 		}
@@ -226,6 +227,7 @@ static zend_always_inline void simdjson_dedup_key_strings_release(HashTable *ht)
     Bucket *p = ht->arData;
     Bucket *end = p + ht->nNumUsed;
     do {
+        ZEND_ASSERT(!ZSTR_IS_INTERNED(p->key));
         if (GC_DELREF(p->key) == 0) {
             ZEND_ASSERT(!(GC_FLAGS(p->key) & IS_STR_PERSISTENT));
             efree(p->key);
@@ -264,6 +266,7 @@ static zend_always_inline zend_string* simdjson_dedup_key(HashTable *ht, const c
     Bucket *p;
     zend_string *key;
 
+    // Maximum string length that we deduplicate is 64 bytes
     if (UNEXPECTED(len > SIMDJSON_MAX_DEDUP_LENGTH)) {
         goto init_new_string;
     }
@@ -309,10 +312,11 @@ static zend_always_inline void simdjson_hash_str_add_or_update(HashTable *ht, co
     zend_ulong h;
 
     // Check if array is initialized with proper flags and size
-    // This checks are removed in production code
+    // These checks are removed in production code
     ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_UNINITIALIZED)); // make sure that hashtable was initialized
     ZEND_ASSERT(!(HT_FLAGS(ht) & HASH_FLAG_PACKED)); // make sure that hashtable is not packed
     ZEND_ASSERT(ht->nNumUsed < ht->nTableSize); // make sure that we still have space for new elements
+    ZEND_ASSERT(ht->pDestructor == ZVAL_PTR_DTOR); // make sure that destructor is defined and set to zval_ptr_dtor
 
     // Compute key hash
     h = zend_inline_hash_func(str, len);
@@ -322,7 +326,7 @@ static zend_always_inline void simdjson_hash_str_add_or_update(HashTable *ht, co
         zval *data;
         ZEND_ASSERT(&p->val != pData);
         data = &p->val;
-        ht->pDestructor(data); // destructor is always defined for this array
+        zval_ptr_dtor(data); // directly call zval_ptr_dtor method
         ZVAL_COPY_VALUE(data, pData);
     } else {
         idx = ht->nNumUsed++;
@@ -488,7 +492,7 @@ static simdjson_php_error_code simdjson_create_object(simdjson::dom::element ele
                 return simdjson::SUCCESS;
             }
 
-            zend_array *arr = simdjson_init_packed_array(return_value, json_array.size());
+            HashTable *arr = simdjson_init_packed_array(return_value, json_array.size());
 
             for (simdjson::dom::element child : json_array) {
                 zval value;
