@@ -7,7 +7,7 @@ namespace SimdjsonBench;
 use PhpBench\Benchmark\Metadata\Annotations\Subject;
 
 if (!extension_loaded('simdjson')) {
-        exit;
+    exit;
 }
 
 /**
@@ -58,7 +58,15 @@ class TwitterDecodeBench
     /**
      * @Subject()
      */
-    public function simdjsonDecodeAssoc()
+    public function jsonKeyCount(): void
+    {
+        count(json_decode($this->json, true)["statuses"]);
+    }
+
+    /**
+     * @Subject()
+     */
+    public function simdjsonDecodeAssoc(): void
     {
         \simdjson_decode($this->json, true);
     }
@@ -66,7 +74,7 @@ class TwitterDecodeBench
     /**
      * @Subject()
      */
-    public function simdjsonDecode()
+    public function simdjsonDecode(): void
     {
         \simdjson_decode($this->json, false);
     }
@@ -74,8 +82,16 @@ class TwitterDecodeBench
     /**
      * @Subject()
      */
-    public function simdjsonValidate()
+    public function simdjsonValidate(): void
     {
         \simdjson_validate($this->json);
+    }
+
+    /**
+     * @Subject()
+     */
+    public function simdjsonKeyCount(): void
+    {
+        \simdjson_key_count($this->json, "/statuses");
     }
 }
