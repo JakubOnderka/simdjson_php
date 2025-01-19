@@ -324,10 +324,6 @@ PHP_FUNCTION(simdjson_key_count) {
         Z_PARAM_BOOL(throw_if_uncountable)
     ZEND_PARSE_PARAMETERS_END();
 
-    if (!simdjson_validate_depth(depth, 3)) {
-        RETURN_THROWS();
-    }
-
     simdjson_php_error_code error;
     if (SIMDJSON_SHOULD_REUSE_PARSER(ZSTR_LEN(json))) {
         error = php_simdjson_key_count(simdjson_get_reused_parser(), json, ZSTR_VAL(key), return_value, depth);

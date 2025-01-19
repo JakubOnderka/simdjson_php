@@ -12,8 +12,6 @@ foreach ([1024, 1 << 27] as $depth) {
     echo "Test depth=$depth:\n";
     $value = simdjson_decode('[]', true, $depth);
     var_dump($value);
-    $value = simdjson_key_count('{"a":"b"}', 'a', $depth);
-    var_dump($value);
     try {
         simdjson_decode(str_repeat('[', 200000) . str_repeat(']', 199999), true, $depth);
         echo "should be invalid\n";
@@ -26,10 +24,8 @@ foreach ([1024, 1 << 27] as $depth) {
 Test depth=1024:
 array(0) {
 }
-int(0)
 Caught SimdJsonDecoderException: The JSON document was too deep (too many nested objects and arrays)
 Test depth=134217728:
 array(0) {
 }
-int(0)
 Caught SimdJsonDecoderException: The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.

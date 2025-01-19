@@ -286,14 +286,13 @@ function simdjson_key_value(string $json, string $key, bool $associative = false
  *
  * @param string $json The JSON string being decoded
  * @param string $key The JSON pointer being requested
- * @param int $depth The maximum nesting depth of the structure being decoded.
+ * @param int $depth Not used anymore
  * @param bool $throw_if_uncountable If true, then throw SimdJsonException instead of
  *                                   returning 0 for JSON pointers
  *                                   to values that are neither objects nor arrays.
  * @return int
  * @throws SimdJsonDecoderException for invalid JSON or invalid JSON pointer
  *                           (or document over 4GB, or out of range integer/float)
- * @throws ValueError for invalid $depth
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
 function simdjson_key_count(string $json, string $key, int $depth = 512, bool $throw_if_uncountable = false): int {}

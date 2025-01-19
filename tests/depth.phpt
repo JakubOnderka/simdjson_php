@@ -8,7 +8,6 @@ error_reporting=E_ALL
 require_once __DIR__ . '/dump.inc';
 
 // too small/large depths tested in decode_max_depth
-var_dump(simdjson_key_count('[]', '', 1));
 var_dump(simdjson_decode('[]', true, 1));
 echo "Test '[1]'\n";
 try {
@@ -30,7 +29,6 @@ var_dump(simdjson_decode('[[]]', true, 2));
 var_dump(simdjson_decode('[[1]]', true, 3));
 ?>
 --EXPECTF--
-int(0)
 array(0) {
 }
 Test '[1]'

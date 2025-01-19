@@ -57,6 +57,14 @@ get_key_with_optional_prefix(simdjson::dom::element &doc, std::string_view json_
     return doc.at_pointer(std_pointer);
 }
 
+static inline simdjson::simdjson_result<simdjson::ondemand::value>
+get_key_with_optional_prefix_ondemand(simdjson::ondemand::document &doc, std::string_view json_pointer) {
+    /* https://www.rfc-editor.org/rfc/rfc6901.html */
+    /* TODO: Deprecate in a subsequent minor release and remove in a major release to comply with the standard. */
+    auto std_pointer = ((!json_pointer.empty() && json_pointer[0] != '/') ? "/" : "") + std::string(json_pointer.begin(), json_pointer.end());
+    return doc.at_pointer(std_pointer);
+}
+
 // Initialize stdClass object and return pointer to propertires HashTable
 static zend_always_inline HashTable* simdjson_init_object(zval *zv, uint32_t size) {
 #if PHP_VERSION_ID >= 80300
@@ -130,7 +138,7 @@ static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_
     return ht;
 }
 
-/** Check if it is necessary to reallocate string to buffer */
+// Check if it is necessary to reallocate string to buffer
 static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) {
     // it is not possible to check allocated size for persistent or permanent string
     bool is_persistent_or_permanent = GC_FLAGS(json) & (IS_STR_PERSISTENT | IS_STR_PERMANENT);
@@ -146,6 +154,14 @@ static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) 
     size_t free_space = allocated - struct_size;
 
     return free_space < simdjson::SIMDJSON_PADDING;
+}
+
+static simdjson::padded_string_view simdjson_padded_string_view(const zend_string *json) {
+    if (simdjson_realloc_needed(json)) {
+        return simdjson::padded_string(ZSTR_VAL(json), ZSTR_LEN(json));
+    } else {
+        return simdjson::padded_string_view(ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING);
+    }
 }
 
 /** Decoded string from JSON must be always UTF-8 valid, so we can provide proper flag to zend_string */
@@ -649,52 +665,29 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_pa
     return get_key_with_optional_prefix(doc, key).error();
 }
 
-/* }}} */
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth) {
+    simdjson::ondemand::document doc;
+    simdjson::ondemand::value value;
+    simdjson::ondemand::json_type type;
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth) /* {{{ */ {
-    simdjson::dom::element doc;
-    simdjson::dom::element element;
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json)).get(doc));
+    SIMDJSON_PHP_TRY(get_key_with_optional_prefix_ondemand(doc, key).get(value));
+    SIMDJSON_PHP_TRY(value.type().get(type));
 
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
-
-    SIMDJSON_PHP_TRY(get_key_with_optional_prefix(doc, key).get(element));
-
-    zend_long key_count;
-    switch (element.type()) {
-        //ASCII sort
-        case simdjson::dom::element_type::ARRAY : {
-            auto json_array = element.get_array().value_unsafe();
-            key_count = zend_long(json_array.size());
-            if (UNEXPECTED(key_count == 0xFFFFFF)) {
-                /* The C simdjson library represents array sizes larger than 0xFFFFFF as 0xFFFFFF. */
-                key_count = 0;
-                for (auto it: json_array)  {
-                    (void)it;
-                    key_count++;
-                }
-                ZEND_ASSERT(key_count >= 0xFFFFFF);
-            }
+    size_t key_count;
+    switch (type) {
+        case simdjson::ondemand::json_type::array:
+            SIMDJSON_PHP_TRY(value.count_elements().get(key_count));
             break;
-        }
-        case simdjson::dom::element_type::OBJECT : {
-            auto json_object = element.get_object().value_unsafe();
-            key_count = zend_long(json_object.size());
-            if (UNEXPECTED(key_count == 0xFFFFFF)) {
-                /* The C simdjson library represents object sizes larger than 0xFFFFFF as 0xFFFFFF. */
-                key_count = 0;
-                for (auto it: json_object) {
-                    (void)it;
-                    key_count++;
-                }
-                ZEND_ASSERT(key_count >= 0xFFFFFF);
-            }
+
+        case simdjson::ondemand::json_type::object:
+            SIMDJSON_PHP_TRY(value.count_fields().get(key_count));
             break;
-        }
+
         default:
             return SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE;
     }
+
     ZVAL_LONG(return_value, key_count);
     return simdjson::SUCCESS;
 }
-
-/* }}} */
