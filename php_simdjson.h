@@ -73,6 +73,17 @@ extern zend_module_entry simdjson_module_entry;
  */
 #define SIMDJSON_MAX_DEDUP_LENGTH             64
 
+/**
+* Configure simdjson library
+*/
+#define SIMDJSON_EXCEPTIONS 0
+
+#ifdef ZEND_DEBUG
+#define SIMDJSON_DEVELOPMENT_CHECKS 1 // enable development checks when using PHP debug build
+#else
+#define SIMDJSON_DEVELOPMENT_CHECKS 0
+#endif
+
 /*
  * NOTE: Namespaces and references(&) are C++ only functionality.
  * To expose this functionality to other C PECLs,
