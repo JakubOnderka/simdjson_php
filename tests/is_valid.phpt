@@ -6,6 +6,27 @@ $json = file_get_contents(__DIR__ . DIRECTORY_SEPARATOR . '_files' . DIRECTORY_S
 $value = \simdjson_is_valid($json);
 var_dump($value);
 
+$value = \simdjson_is_valid("true");
+var_dump($value);
+
+$value = \simdjson_is_valid("false");
+var_dump($value);
+
+$value = \simdjson_is_valid("null");
+var_dump($value);
+
+$value = \simdjson_is_valid("[]");
+var_dump($value);
+
+$value = \simdjson_is_valid("{}");
+var_dump($value);
+
+$value = \simdjson_is_valid("1");
+var_dump($value);
+
+$value = \simdjson_is_valid("1.1");
+var_dump($value);
+
 $value = \simdjson_is_valid('{"corrupt": true,');
 var_dump($value);
 
@@ -15,9 +36,20 @@ var_dump($value);
 $value = \simdjson_is_valid('Invalid JSON string');
 var_dump($value);
 
+$value = \simdjson_is_valid('{"value": true}  ');
+var_dump($value);
+
 ?>
 --EXPECTF--
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
+bool(true)
 bool(true)
 bool(false)
 bool(false)
 bool(false)
+bool(true)

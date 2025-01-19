@@ -25,6 +25,8 @@ extern "C" {
 #include "simdjson_compatibility.h"
 
 #define SIMDJSON_PHP_TRY(EXPR) { auto _err = (EXPR); if (UNEXPECTED(_err)) { return _err; } }
+#define SIMDJSON_PHP_CHECK_ERROR(EXPR) { auto _err = (EXPR).error(); if (UNEXPECTED(_err)) { return _err; } }
+#define SIMDJSON_PHP_VALUE(EXPR) ({ auto _res = EXPR; auto _err = _res.error(); if (UNEXPECTED(_err)) { return _err; } _res.value_unsafe(); })
 
 #define SIMDJSON_DEPTH_CHECK_THRESHOLD 100000
 
@@ -626,13 +628,62 @@ static simdjson_php_error_code simdjson_convert_element(simdjson::dom::element e
     return resp;
 }
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) /* {{{ */ {
-    simdjson::dom::element doc;
-    /* The depth is passed in to ensure this behaves the same way for the same arguments */
-    return build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth);
+static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::value element, size_t max_depth) {
+    if (UNEXPECTED(element.current_depth() > max_depth)) {
+        return simdjson::DEPTH_ERROR;
+    }
+
+    switch (SIMDJSON_PHP_VALUE(element.type())) {
+        case simdjson::ondemand::json_type::array:
+            for (auto child : element.get_array()) {
+                SIMDJSON_PHP_TRY(simdjson_ondemand_validate(SIMDJSON_PHP_VALUE(child), max_depth));
+            }
+            break;
+        case simdjson::ondemand::json_type::object:
+            for (auto field : element.get_object()) {
+                SIMDJSON_PHP_TRY(simdjson_ondemand_validate(SIMDJSON_PHP_VALUE(field).value(), max_depth));
+            }
+            break;
+        case simdjson::ondemand::json_type::number:
+            return element.get_number().error();
+        case simdjson::ondemand::json_type::string:
+            return element.get_raw_json_string().error();
+        case simdjson::ondemand::json_type::boolean:
+            return element.get_bool().error();
+        case simdjson::ondemand::json_type::null:
+            return element.is_null().error();
+        EMPTY_SWITCH_DEFAULT_CASE();
+    }
+    return simdjson::SUCCESS;
 }
 
-/* }}} */
+static inline simdjson_php_error_code simdjson_ondemand_validate_scalar(simdjson::ondemand::document *element) {
+    switch (SIMDJSON_PHP_VALUE(element->type())) {
+        case simdjson::ondemand::json_type::number:
+            return element->get_number().error();
+        case simdjson::ondemand::json_type::string:
+            return element->get_raw_json_string().error();
+        case simdjson::ondemand::json_type::boolean:
+            return element->get_bool().error();
+        case simdjson::ondemand::json_type::null:
+            return element->is_null().error();
+        EMPTY_SWITCH_DEFAULT_CASE();
+    }
+}
+
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) {
+    simdjson::padded_string jsonbuffer;
+    simdjson::ondemand::document doc;
+    simdjson::ondemand::value value;
+
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
+    if (SIMDJSON_PHP_VALUE(doc.is_scalar())) {
+        return simdjson_ondemand_validate_scalar(&doc);
+    }
+
+    SIMDJSON_PHP_TRY(doc.get(value));
+    return simdjson_ondemand_validate(value, depth);
+}
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
