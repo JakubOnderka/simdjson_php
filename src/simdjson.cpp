@@ -1,4 +1,4 @@
-/* auto-generated on 2024-12-12 13:38:22 -0500. Do not edit! */
+/* auto-generated on 2025-01-16 13:33:53 -0500. Do not edit! */
 /* including simdjson.cpp:  */
 /* begin file simdjson.cpp */
 #define SIMDJSON_SRC_SIMDJSON_CPP
@@ -83,9 +83,20 @@
 #endif
 #endif
 
+#if defined(__apple_build_version__)
+#if __apple_build_version__ < 14000000
+#define SIMDJSON_CONCEPT_DISABLED 1 // apple-clang/13 doesn't support std::convertible_to
+#endif
+#endif
+
+
 #if defined(__cpp_concepts) && !defined(SIMDJSON_CONCEPT_DISABLED)
+#if __cpp_concepts >= 201907L
 #include <utility>
 #define SIMDJSON_SUPPORTS_DESERIALIZATION 1
+#else
+#define SIMDJSON_SUPPORTS_DESERIALIZATION 0
+#endif
 #else // defined(__cpp_concepts) && !defined(SIMDJSON_CONCEPT_DISABLED)
 #define SIMDJSON_SUPPORTS_DESERIALIZATION 0
 #endif // defined(__cpp_concepts) && !defined(SIMDJSON_CONCEPT_DISABLED)
@@ -102,10 +113,14 @@
 #include <cstdlib>
 #include <cfloat>
 #include <cassert>
+#include <climits>
 #ifndef _WIN32
 // strcasecmp, strncasecmp
 #include <strings.h>
 #endif
+
+static_assert(CHAR_BIT == 8, "simdjson requires 8-bit bytes");
+
 
 // We are using size_t without namespace std:: throughout the project
 using std::size_t;
@@ -140,6 +155,7 @@ using std::size_t;
 #elif defined(__loongarch_lp64)
 #define SIMDJSON_IS_LOONGARCH64 1
 #elif defined(__PPC64__) || defined(_M_PPC64)
+#define SIMDJSON_IS_PPC64 1
 #if defined(__ALTIVEC__)
 #define SIMDJSON_IS_PPC64_VMX 1
 #endif // defined(__ALTIVEC__)
@@ -9343,7 +9359,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -15713,7 +15729,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -21943,7 +21959,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -28329,7 +28345,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -35081,7 +35097,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -41657,7 +41673,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -47678,7 +47694,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
@@ -53298,7 +53314,7 @@ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
   // to handle that max may be a macro on windows).
 
   // SIMDJSON_PHP patch imitating PHP json_decode() to accept infinite values
-  return true; //return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
+  return true; // return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
 }
 
 static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
