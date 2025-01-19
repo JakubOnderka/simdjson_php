@@ -156,9 +156,10 @@ static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) 
     return free_space < simdjson::SIMDJSON_PADDING;
 }
 
-static simdjson::padded_string_view simdjson_padded_string_view(const zend_string *json) {
+static simdjson::padded_string_view simdjson_padded_string_view(const zend_string *json, simdjson::padded_string &jsonbuffer) {
     if (simdjson_realloc_needed(json)) {
-        return simdjson::padded_string(ZSTR_VAL(json), ZSTR_LEN(json));
+        jsonbuffer = simdjson::padded_string(ZSTR_VAL(json), ZSTR_LEN(json));
+        return jsonbuffer;
     } else {
         return simdjson::padded_string_view(ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING);
     }
@@ -659,18 +660,21 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_value(simdjson_php_par
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_parser* parser, const zend_string *json, const char *key, size_t depth) /* {{{ */ {
-    simdjson::dom::element doc;
-    SIMDJSON_PHP_TRY(build_parsed_json_cust(parser, doc, ZSTR_VAL(json), ZSTR_LEN(json), simdjson_realloc_needed(json), depth));
-    return get_key_with_optional_prefix(doc, key).error();
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_parser* parser, const zend_string *json, const char *key) {
+    simdjson::padded_string jsonbuffer;
+    simdjson::ondemand::document doc;
+
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
+    return get_key_with_optional_prefix_ondemand(doc, key).error();
 }
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth) {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value) {
+    simdjson::padded_string jsonbuffer;
     simdjson::ondemand::document doc;
     simdjson::ondemand::value value;
     simdjson::ondemand::json_type type;
 
-    SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json)).get(doc));
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
     SIMDJSON_PHP_TRY(get_key_with_optional_prefix_ondemand(doc, key).get(value));
     SIMDJSON_PHP_TRY(value.type().get(type));
 

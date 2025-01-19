@@ -302,11 +302,10 @@ function simdjson_key_count(string $json, string $key, int $depth = 512, bool $t
  *
  * @param string $json The JSON string being decoded
  * @param string $key The JSON pointer being requested
- * @param int $depth the maximum nesting depth of the structure being decoded.
+ * @param int $depth Not used anymore
  * @return bool (false if key is not found)
  * @throws SimdJsonDecoderException for invalid JSON or invalid JSON pointer
  *                           (or document over 4GB, or out of range integer/float)
- * @throws ValueError for invalid $depth
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
 function simdjson_key_exists(string $json, string $key, int $depth = 512): bool {}

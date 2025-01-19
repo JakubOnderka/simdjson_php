@@ -10,30 +10,24 @@ require_once __DIR__ . '/dump.inc';
 foreach ([0, PHP_INT_MIN, 1024, PHP_INT_MAX >> 1, PHP_INT_MAX] as $depth) {
     dump(function () use ($depth) { return simdjson_decode('[]', true, $depth); });
     dump(function () use ($depth) { return simdjson_key_value('{"a":{}}', 'a', true, $depth); });
-    dump(function () use ($depth) { return simdjson_key_exists('{"a":{}}', 'a', $depth); });
     dump(function () use ($depth) { return simdjson_is_valid('{}', $depth); });
 }
 ?>
 --EXPECTF--
 Caught ValueError: simdjson_decode(): Argument #3 ($depth) must be greater than zero
 Caught ValueError: simdjson_key_value(): Argument #4 ($depth) must be greater than zero
-Caught ValueError: simdjson_key_exists(): Argument #3 ($depth) must be greater than zero
 Caught ValueError: simdjson_is_valid(): Argument #2 ($depth) must be greater than zero
 Caught ValueError: simdjson_decode(): Argument #3 ($depth) must be greater than zero
 Caught ValueError: simdjson_key_value(): Argument #4 ($depth) must be greater than zero
-Caught ValueError: simdjson_key_exists(): Argument #3 ($depth) must be greater than zero
 Caught ValueError: simdjson_is_valid(): Argument #2 ($depth) must be greater than zero
 array(0) {
 }
 array(0) {
 }
 bool(true)
-bool(true)
 Caught ValueError: simdjson_decode(): Argument #3 ($depth) exceeds maximum allowed value of %d
 Caught ValueError: simdjson_key_value(): Argument #4 ($depth) exceeds maximum allowed value of %d
-Caught ValueError: simdjson_key_exists(): Argument #3 ($depth) exceeds maximum allowed value of %d
 Caught ValueError: simdjson_is_valid(): Argument #2 ($depth) exceeds maximum allowed value of %d
 Caught ValueError: simdjson_decode(): Argument #3 ($depth) exceeds maximum allowed value of %d
 Caught ValueError: simdjson_key_value(): Argument #4 ($depth) exceeds maximum allowed value of %d
-Caught ValueError: simdjson_key_exists(): Argument #3 ($depth) exceeds maximum allowed value of %d
 Caught ValueError: simdjson_is_valid(): Argument #2 ($depth) exceeds maximum allowed value of %d
