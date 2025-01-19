@@ -651,7 +651,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_exists(simdjson_php_pa
 
 /* }}} */
 
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable) /* {{{ */ {
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth) /* {{{ */ {
     simdjson::dom::element doc;
     simdjson::dom::element element;
 

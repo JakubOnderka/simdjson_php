@@ -330,10 +330,10 @@ PHP_FUNCTION(simdjson_key_count) {
 
     simdjson_php_error_code error;
     if (SIMDJSON_SHOULD_REUSE_PARSER(ZSTR_LEN(json))) {
-        error = php_simdjson_key_count(simdjson_get_reused_parser(), json, ZSTR_VAL(key), return_value, depth, throw_if_uncountable);
+        error = php_simdjson_key_count(simdjson_get_reused_parser(), json, ZSTR_VAL(key), return_value, depth);
     } else {
         simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
-        error = php_simdjson_key_count(simdjson_php_parser, json, ZSTR_VAL(key), return_value, depth, throw_if_uncountable);
+        error = php_simdjson_key_count(simdjson_php_parser, json, ZSTR_VAL(key), return_value, depth);
         php_simdjson_free_parser(simdjson_php_parser);
     }
 

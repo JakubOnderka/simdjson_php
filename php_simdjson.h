@@ -217,7 +217,7 @@ PHP_SIMDJSON_API uint8_t php_simdjson_key_exists(struct simdjson_php_parser* par
  *
  * @see https://www.rfc-editor.org/rfc/rfc6901.html
  */
-PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(struct simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth, bool fail_if_uncountable);
+PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(struct simdjson_php_parser* parser, const zend_string *json, const char *key, zval *return_value, size_t depth);
 
 END_EXTERN_C()
 
