@@ -629,7 +629,7 @@ static simdjson_php_error_code simdjson_convert_element(simdjson::dom::element e
 }
 
 static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::value element, size_t max_depth) {
-    if (UNEXPECTED(element.current_depth() > max_depth)) {
+    if (UNEXPECTED(element.current_depth() >= max_depth)) {
         return simdjson::DEPTH_ERROR;
     }
 
@@ -676,6 +676,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
     simdjson::ondemand::document doc;
     simdjson::ondemand::value value;
 
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.allocate(ZSTR_LEN(json), depth));
     SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
     if (SIMDJSON_PHP_VALUE(doc.is_scalar())) {
         return simdjson_ondemand_validate_scalar(&doc);
