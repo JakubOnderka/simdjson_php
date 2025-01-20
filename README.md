@@ -15,6 +15,7 @@
 | Encode                | 0.67 ms      | 0.26 ms      | **2.5×** |
 | Encode (pretty print) | 0.83 ms      | 0.31 ms      | **2.6×** |
 | Validate              | 1.37 ms      | 0.22 ms      | **6.2×** |
+| Count items           | 1.51 ms      | 0.16 ms      | **9.4×** |
 
 Tests were conducted using PHP 8.3 on an [Apple M1 Max](https://en.wikipedia.org/wiki/Apple_M1#M1_Pro_and_M1_Max). For test specification see `TwitterDecodeBench.php` and `TwitterEncoderBench.php`.
 
