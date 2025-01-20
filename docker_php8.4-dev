@@ -19,4 +19,4 @@ RUN cd /tmp/simdjson && \
     phpize && \
     ./configure && \
     make -j$(nproc) && \
-    make test TESTS="-m --show-diff"
+    make test TESTS="-m --show-diff -j2"
