@@ -682,7 +682,13 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
     }
 
     SIMDJSON_PHP_TRY(doc.get(value));
-    return simdjson_ondemand_validate(value, depth);
+    SIMDJSON_PHP_TRY(simdjson_ondemand_validate(value, depth));
+
+    if (UNEXPECTED(!doc.at_end())) {
+        return simdjson::TRAILING_CONTENT;
+    }
+
+    return simdjson::SUCCESS;
 }
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_parse(simdjson_php_parser* parser, const zend_string *json, zval *return_value, bool associative, size_t depth) /* {{{ */ {
