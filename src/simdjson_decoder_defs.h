@@ -24,6 +24,7 @@ public:
     simdjson::dom::parser parser;
     simdjson::ondemand::parser ondemand_parser;
     HashTable dedup_key_strings;
+    size_t max_depth;
 };
 
 #endif
