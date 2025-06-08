@@ -1,0 +1,76 @@
+name: Windows
+
+on:
+  push:
+  release:
+    types: [published]
+
+env:
+  PHP_EXT: simdjson
+  PHP_EXT_VERSION: ${{ github.event.release.tag_name }}
+  BIN_SDK_VER: 2.3.0
+
+jobs:
+  ci:
+    strategy:
+      matrix:
+        php:
+          - '8.4'
+          - '8.3'
+          - '8.2'
+          - '8.1'
+          - '8.0'
+        ts:
+          - 'nts'
+          - 'ts'
+        vs:
+          - vs16
+          - vs17
+        exclude:
+          - php: '8.4'
+            vs: vs16
+          - php: '8.3'
+            vs: vs17
+          - php: '8.2'
+            vs: vs17
+          - php: '8.1'
+            vs: vs17
+          - php: '8.0'
+            vs: vs17
+
+    runs-on: ${{ matrix.vs == 'vs17' && 'windows-2022' || 'windows-2019' }}
+
+    env:
+      PHP_VER: ${{ matrix.php }}
+      VS: ${{ matrix.vs }}
+      ARCH: x64
+      TS: ${{ matrix.ts }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            C:\php\php-*.zip
+          key: ${{ runner.os }}-php-${{ matrix.php }}-${{ matrix.ts }}-${{ matrix.vs }}
+          restore-keys: |
+            ${{ runner.os }}-php-
+
+      - name: Install build command
+        run: .\.github\workflows\install.ps1
+        shell: pwsh
+
+      - name: Build
+        run: .\.github\workflows\build.ps1
+        shell: pwsh
+
+      - name: Test
+        run: .\.github\workflows\test.ps1
+        shell: pwsh
+        env:
+          REPORT_EXIT_STATUS: 1
+          NO_INTERACTION: 1
