@@ -23,6 +23,17 @@
 #define simdjson_vector8_to_bitmask(_v) vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(_v), 4)), 0)
 #endif
 
+static zend_always_inline int _trailing_zeroes(uint64_t input_num) {
+#ifdef _MSC_VER
+    unsigned long ret;
+    // Search the mask data from least significant bit (LSB)
+    // to the most significant bit (MSB) for a set bit (1).
+    _BitScanForward64(&ret, input_num);
+    return (int)ret;
+#else  // _MSC_VER
+    return __builtin_ctzll(input_num);
+#endif // _MSC_VER
+}
 
 struct simdjson_vector8 {
 #ifdef __SSE2__
@@ -59,9 +70,9 @@ struct simdjson_vector8 {
 
     inline uint64_t escape_index(uint64_t mask) {
 #ifdef __SSE2__
-        return __builtin_ctzll(mask);
+        return _trailing_zeroes(mask);
 #elif defined(__aarch64__) || defined(_M_ARM64)
-        return __builtin_ctzll(mask) / 4;
+        return _trailing_zeroes(mask) / 4;
 #endif
     }
 };

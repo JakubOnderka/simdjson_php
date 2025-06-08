@@ -526,8 +526,20 @@ static zend_always_inline bool simdjson_avx2_supported() {
 #ifdef __AVX2__
     return true;
 #endif
-
+#ifdef __builtin_cpu_supports
     return __builtin_cpu_supports("avx2"); // check support in runtime
+#endif
+
+	int cpuInfo[4];
+	__cpuid(cpuInfo, 0);
+	int nIds = cpuInfo[0];
+
+	if (nIds >= 7) {
+		__cpuidex(cpuInfo, 7, 0);
+		return (cpuInfo[1] & (1 << 5)) != 0;
+	}
+
+	return false;
 }
 
 TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
