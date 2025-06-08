@@ -23,7 +23,7 @@
 #define simdjson_vector8_to_bitmask(_v) vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(_v), 4)), 0)
 #endif
 
-inline int _trailing_zeroes(uint64_t input_num) {
+static zend_always_inline int _trailing_zeroes(uint64_t input_num) {
 #ifdef _MSC_VER
     unsigned long ret;
     // Search the mask data from least significant bit (LSB)
