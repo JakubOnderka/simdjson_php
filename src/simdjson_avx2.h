@@ -4,10 +4,10 @@
 #include <stdint.h>
 #ifdef _MSC_VER // visual studio
 #include <intrin.h>
-#define TARGET_AVX2 __attribute__((target("avx2")))
+#define TARGET_AVX2
 #else // elsewhere
 #include <x86intrin.h>
-#define TARGET_AVX2
+#define TARGET_AVX2 __attribute__((target("avx2")))
 #endif
 
 #define simdjson_avx2_or _mm256_or_si256
