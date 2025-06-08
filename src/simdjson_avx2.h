@@ -2,7 +2,11 @@
 #define SIMDJSON_VECTOR8_TARGET_AVX2_H
 
 #include <stdint.h>
-#include <x86intrin.h>
+#ifdef _MSC_VER
+#include <intrin.h> // visual studio
+#else
+#include <x86intrin.h> // elsewhere
+#endif
 
 #define TARGET_AVX2 __attribute__((target("avx2")))
 
