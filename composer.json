@@ -1,0 +1,22 @@
+{
+  "name": "jakubonderka/simdjson_php",
+  "description": "Fast JSON parser and encoder for PHP using simdjson library (ZTS-compatible fork)",
+  "type": "php-ext",
+  "keywords": ["json", "encoder", "decoder", "simd", "zts", "thread-safe"],
+  "homepage": "https://github.com/JakubOnderka/simdjson_php",
+  "license": "Apache-2.0",
+  "support": {
+    "issues": "https://github.com/JakubOnderka/simdjson_php/issues",
+    "source": "https://github.com/JakubOnderka/simdjson_php"
+  },
+  "php-ext": {
+    "extension-name": "simdjson"
+  },
+  "require": {
+    "php": ">=8.0"
+  },
+  "prefer-stable": true,
+  "config": {
+    "sort-packages": true
+  }
+}
