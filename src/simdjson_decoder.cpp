@@ -36,6 +36,10 @@ PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code erro
             return "JSON pointer refers to a value that cannot be counted";
         case SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY:
             return "Invalid property name";
+        case simdjson::TAPE_ERROR:
+            // simdjson error message for tape error contains unnecessary information and sometimes changes between releases
+            // so in that case we return our own error message
+            return "The JSON document has an improper structure: missing or superfluous commas, braces, missing keys, etc.";
         default:
             const char *error_message = simdjson::error_message((simdjson::error_code) error);
             // Remove error code name from message
@@ -657,20 +661,6 @@ static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::va
     return simdjson::SUCCESS;
 }
 
-static inline simdjson_php_error_code simdjson_ondemand_validate_scalar(simdjson::ondemand::document *element) {
-    switch (SIMDJSON_PHP_VALUE(element->type())) {
-        case simdjson::ondemand::json_type::number:
-            return element->get_number().error();
-        case simdjson::ondemand::json_type::string:
-            return element->get_raw_json_string().error();
-        case simdjson::ondemand::json_type::boolean:
-            return element->get_bool().error();
-        case simdjson::ondemand::json_type::null:
-            return element->is_null().error();
-        EMPTY_SWITCH_DEFAULT_CASE();
-    }
-}
-
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) {
     simdjson::padded_string jsonbuffer;
     simdjson::ondemand::document doc;
@@ -678,8 +668,17 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
 
     SIMDJSON_PHP_TRY(parser->ondemand_parser.allocate(ZSTR_LEN(json), depth));
     SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
-    if (SIMDJSON_PHP_VALUE(doc.is_scalar())) {
-        return simdjson_ondemand_validate_scalar(&doc);
+
+    // In case document is just scalar type, directly return error code
+    switch (SIMDJSON_PHP_VALUE(doc.type())) {
+        case simdjson::ondemand::json_type::number:
+            return doc.get_number().error();
+        case simdjson::ondemand::json_type::string:
+            return doc.get_raw_json_string().error();
+        case simdjson::ondemand::json_type::boolean:
+            return doc.get_bool().error();
+        case simdjson::ondemand::json_type::null:
+            return doc.is_null().error();
     }
 
     SIMDJSON_PHP_TRY(doc.get(value));
