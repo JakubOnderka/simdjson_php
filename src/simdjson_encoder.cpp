@@ -154,7 +154,6 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 }
 
 static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table, simdjson_encoder *encoder) {
-	int need_comma = 0;
 	zend_string *key;
 	zval *data;
 	zend_ulong index;
@@ -173,12 +172,6 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	++encoder->depth;
 
 	ZEND_HASH_FOREACH_KEY_VAL_IND(table, index, key, data) {
-		if (need_comma) {
-			simdjson_smart_str_appendc(buf, ',');
-		} else {
-			need_comma = 1;
-		}
-
 		simdjson_pretty_print_nl_ident(buf, encoder);
 
 		if (EXPECTED(key)) {
@@ -198,7 +191,11 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 			SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 			return FAILURE;
 		}
+
+		simdjson_smart_str_appendc(buf, ',');
 	} ZEND_HASH_FOREACH_END();
+
+	ZSTR_LEN(buf->s)--; // remove last comma
 
 	SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 
@@ -208,10 +205,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 	}
 	--encoder->depth;
 
-	/* Only keep closing bracket on same line for empty arrays/objects */
-	if (need_comma) {
-		simdjson_pretty_print_nl_ident(buf, encoder);
-	}
+    simdjson_pretty_print_nl_ident(buf, encoder);
 	simdjson_smart_str_appendc(buf, '}');
 
 	return SUCCESS;
