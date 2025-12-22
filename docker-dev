@@ -4,12 +4,13 @@ RUN apt-get update && \
     apt-get install -y curl gcc xz-utils libxml2-dev pkg-config make autoconf g++ valgrind && \
     rm -rf /var/lib/apt/lists/
 
-RUN curl -L https://www.php.net/distributions/php-8.4.8.tar.xz | tar xJf - && \
-    cd php-8.4.8 && \
+ARG PHP_VERSION=8.4.16
+RUN curl -L https://www.php.net/distributions/php-$PHP_VERSION.tar.xz | tar xJf - && \
+    cd php-$PHP_VERSION && \
     ./configure --enable-debug --without-sqlite3 --disable-pdo --disable-dom --disable-simplexml --without-pdo-sqlite && \
     make -j$(nproc) && \
     make install && \
-    rm -rf /php-8.4.8
+    rm -rf /php-$PHP_VERSION
 
 COPY . /tmp/simdjson
 
@@ -17,4 +18,4 @@ RUN cd /tmp/simdjson && \
     phpize && \
     ./configure && \
     make -j$(nproc) && \
-    make test TESTS="-m --show-diff -j2"
+    make test TESTS="-m --show-diff -j$(nproc)"
