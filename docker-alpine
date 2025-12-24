@@ -1,4 +1,5 @@
-FROM php:8.0-cli-alpine3.16
+ARG BASE_IMAGE=8.0-cli-alpine3.16
+FROM php:$BASE_IMAGE
 
 COPY . /tmp/simdjson
 
@@ -18,10 +19,10 @@ RUN set -xe \
     && apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS \
     && cd /tmp/simdjson \
-        && phpize  \
-        && ./configure  \
-        && make -j$(nproc)  \
-        && make install \
-        && make test \
-        && rm -rf /tmp/simdjson \
-        && echo "extension=simdjson.so" > /usr/local/etc/php/conf.d/simdjson.ini
+    && phpize  \
+    && ./configure  \
+    && make -j$(nproc)  \
+    && make install \
+    && make test \
+    && rm -rf /tmp/simdjson \
+    && echo "extension=simdjson.so" > /usr/local/etc/php/conf.d/simdjson.ini
