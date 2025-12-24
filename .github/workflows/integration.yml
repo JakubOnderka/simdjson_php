@@ -6,19 +6,19 @@ jobs:
     strategy:
       matrix:
         php-version:
-          - "8.0"
-          - "8.1"
-          - "8.2"
-          - "8.3"
-          - "8.4"
-          - "8.5"
+          - "8.0-cli-alpine3.16"
+          - "8.1-cli-alpine3.19"
+          - "8.2-cli-alpine3.19"
+          - "8.3-cli-alpine3.19"
+          - "8.4-cli-alpine3.19"
+          - "8.5-cli-alpine3.22"
     runs-on: ubuntu-latest
     steps:
       - name: "Checkout"
         uses: actions/checkout@v4
 
       - name: "Build extension"
-        run: "docker build -t simdjsontest -f docker_php${{ matrix.php-version }}-alpine ."
+        run: "docker build -t simdjsontest -f docker-alpine --build-arg BASE_IMAGE=${{ matrix.php-version }} ."
 
       - name: "Show"
         run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
