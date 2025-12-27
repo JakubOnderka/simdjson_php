@@ -99,16 +99,14 @@ static inline void simdjson_append_long(smart_str *buf, zend_long number) {
 
 #define SIMDJSON_HASH_PROTECT_RECURSION(_tmp_ht) \
 	do { \
-		if (EXPECTED(_tmp_ht)) { \
-			GC_TRY_PROTECT_RECURSION(_tmp_ht); \
-		} \
+		ZEND_ASSERT(_tmp_ht); \
+        GC_TRY_PROTECT_RECURSION(_tmp_ht); \
 	} while (0)
 
 #define SIMDJSON_HASH_UNPROTECT_RECURSION(_tmp_ht) \
 	do { \
-		if (EXPECTED(_tmp_ht)) { \
-			GC_TRY_UNPROTECT_RECURSION(_tmp_ht); \
-		} \
+		ZEND_ASSERT(_tmp_ht); \
+        GC_TRY_UNPROTECT_RECURSION(_tmp_ht); \
 	} while (0)
 
 // Specific implementation for faster encoding packed arrays
@@ -332,7 +330,7 @@ static zend_result simdjson_encode_array(smart_str *buf, zval *val, simdjson_enc
     recursion_rc = (zend_refcounted *)myht;
 #endif
 
-	if (recursion_rc && GC_IS_RECURSIVE(recursion_rc)) {
+	if (GC_IS_RECURSIVE(recursion_rc)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		zend_release_properties(myht);
 		return FAILURE;
@@ -736,7 +734,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 #else
 	HashTable* myht = Z_OBJPROP_P(val);
 
-	if (myht && GC_IS_RECURSIVE(myht)) {
+	if (GC_IS_RECURSIVE(myht)) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
