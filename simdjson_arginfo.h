@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 1593e3c33138c464eaf0df92264ac9ee21bf0278 */
+ * Stub hash: 4abcefaf1ba05d4aa5116cee1d05a4df01f935a0 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -47,6 +47,10 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_is_valid_utf8, 0, 1, _I
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_simdjson_utf8_len, 0, 1, MAY_BE_LONG|MAY_BE_BOOL)
+	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_encode, 0, 1, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(0, value, IS_MIXED, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, flags, IS_LONG, 0, "0")
@@ -80,6 +84,7 @@ ZEND_FUNCTION(simdjson_key_count);
 ZEND_FUNCTION(simdjson_key_exists);
 ZEND_FUNCTION(simdjson_cleanup);
 ZEND_FUNCTION(simdjson_is_valid_utf8);
+ZEND_FUNCTION(simdjson_utf8_len);
 ZEND_FUNCTION(simdjson_encode);
 ZEND_FUNCTION(simdjson_encode_to_stream);
 ZEND_METHOD(SimdJsonBase64Encode, __construct);
@@ -96,6 +101,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
 	ZEND_FE(simdjson_cleanup, arginfo_simdjson_cleanup)
 	ZEND_FE(simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8)
+	ZEND_FE(simdjson_utf8_len, arginfo_simdjson_utf8_len)
 	ZEND_FE(simdjson_encode, arginfo_simdjson_encode)
 	ZEND_FE(simdjson_encode_to_stream, arginfo_simdjson_encode_to_stream)
 	ZEND_FE_END
