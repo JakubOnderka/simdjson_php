@@ -250,6 +250,27 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         RETURN_THROWS();
     }
 
+    if (php_stream_mmap_possible(stream)) {
+        size_t mapped;
+        const char* p = php_stream_mmap_range(stream, php_stream_tell(stream), PHP_STREAM_MMAP_ALL, PHP_STREAM_MAP_MODE_SHARED_READONLY, &mapped);
+        if (EXPECTED(p)) {
+            simdjson_php_error_code error;
+            if (SIMDJSON_SHOULD_REUSE_PARSER(mapped)) {
+                error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), p, mapped, return_value, associative, depth);
+            } else {
+                simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+                error = php_simdjson_parse_buffer(simdjson_php_parser, p, mapped, return_value, associative, depth);
+                php_simdjson_free_parser(simdjson_php_parser);
+            }
+            php_stream_mmap_unmap_ex(stream, mapped);
+            if (UNEXPECTED(error)) {
+                php_simdjson_throw_jsonexception(error);
+                RETURN_THROWS();
+            }
+            return;
+        }
+    }
+
     if ((json = simdjson_stream_copy_to_mem(stream, &len)) == NULL) {
         php_simdjson_throw_jsonexception(simdjson::EMPTY);
         RETURN_THROWS();
