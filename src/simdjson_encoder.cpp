@@ -97,6 +97,15 @@ static inline void simdjson_append_long(smart_str *buf, zend_long number) {
     ZSTR_LEN(buf->s) += chars;
 }
 
+static inline void simdjson_append_number_index(smart_str *buf, zend_ulong index) {
+    char *output = simdjson_smart_str_alloc(buf, strlen("18446744073709551615") + 2);
+    *output++ = '"';
+    unsigned chars = simdjson_u64toa_countlut(index, output);
+    output += chars;
+    *output = '"';
+    ZSTR_LEN(buf->s) += chars + 2;
+}
+
 #define SIMDJSON_HASH_PROTECT_RECURSION(_tmp_ht) \
 	do { \
 		ZEND_ASSERT(_tmp_ht); \
@@ -178,9 +187,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 				return FAILURE;
 			}
 		} else {
-			simdjson_smart_str_appendc(buf, '"');
-			simdjson_append_long(buf, (zend_long) index);
-			simdjson_smart_str_appendc(buf, '"');
+		    simdjson_append_number_index(buf, index);
 		}
 
 		simdjson_pretty_print_colon(buf, encoder);
@@ -375,10 +382,7 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
                 }
 
                 simdjson_pretty_print_nl_ident(buf, encoder);
-
-                simdjson_smart_str_appendc(buf, '"');
-                simdjson_append_long(buf, (zend_long) index);
-                simdjson_smart_str_appendc(buf, '"');
+                simdjson_append_number_index(buf, index);
             }
 
             simdjson_pretty_print_colon(buf, encoder);
