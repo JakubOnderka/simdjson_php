@@ -417,6 +417,36 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
     return SUCCESS;
 }
 
+// Check if array is packed and can be encoded by simdjson_encode_packed_array method
+static zend_always_inline bool simdjson_array_is_packed(HashTable *array) {
+    zend_ulong expected_idx = 0;
+	zend_ulong num_idx;
+
+    if (HT_IS_PACKED(array)) {
+        if (HT_IS_WITHOUT_HOLES(array)) {
+            return true;
+        }
+        /* Check if the list could theoretically be repacked */
+#if PHP_VERSION_ID >= 80200
+        ZEND_HASH_PACKED_FOREACH_KEY(array, num_idx) {
+            if (num_idx != expected_idx++) {
+                return false;
+            }
+        } ZEND_HASH_FOREACH_END();
+#else
+        zend_string* str_idx;
+        ZEND_HASH_FOREACH_KEY(array, num_idx, str_idx) {
+            if (str_idx != NULL || num_idx != expected_idx++) {
+                return false;
+            }
+        } ZEND_HASH_FOREACH_END();
+#endif
+
+        return true;
+    }
+    return false;
+}
+
 static zend_result simdjson_encode_array_or_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
 	if (UNEXPECTED(simdjson_check_stack_limit())) {
 		encoder->error_code = SIMDJSON_ERROR_DEPTH;
@@ -430,7 +460,7 @@ static zend_result simdjson_encode_array_or_object(smart_str *buf, zval *val, si
 			simdjson_smart_str_appendl(buf, "[]", 2);
 			return SUCCESS;
 		}
-        if (zend_array_is_list(myht)) {
+        if (simdjson_array_is_packed(myht)) {
         	return simdjson_encode_packed_array(buf, myht, encoder);
         } else {
         	return simdjson_encode_mixed_array(buf, myht, encoder);
