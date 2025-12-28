@@ -324,6 +324,14 @@ function simdjson_cleanup(): true {}
 function simdjson_is_valid_utf8(string $string): bool {}
 
 /**
+ * Return number of characters of UTF-8 encoded string. In case string is not valid UTF-8 string, false is returned.
+ *
+ * @param string $string
+ * @return int|bool
+ */
+function simdjson_utf8_len(string $string): int|bool {}
+
+/**
  * Returns the JSON representation of a value
  *
  * @param mixed $value The value being encoded. Can be any type except a resource.

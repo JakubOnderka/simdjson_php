@@ -390,7 +390,7 @@ PHP_FUNCTION(simdjson_cleanup) {
 }
 
 PHP_FUNCTION(simdjson_is_valid_utf8) {
-    zend_string *string = NULL;
+    zend_string *string;
 
     ZEND_PARSE_PARAMETERS_START(1, 1)
         Z_PARAM_STR(string)
@@ -407,6 +407,25 @@ PHP_FUNCTION(simdjson_is_valid_utf8) {
         GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
     }
     RETURN_BOOL(is_ok);
+}
+
+PHP_FUNCTION(simdjson_utf8_len) {
+	zend_string *string;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(string)
+	ZEND_PARSE_PARAMETERS_END();
+
+    bool is_ok = ZSTR_IS_VALID_UTF8(string) || simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
+    if (EXPECTED(is_ok)) {
+        // String is UTF-8 valid, so we can also set proper flag
+        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+        // Compute number of chars
+        RETURN_LONG(simdutf::count_utf8(ZSTR_VAL(string), ZSTR_LEN(string)));
+    }
+
+    // Return false in case string is not UTF-8 valid
+    RETURN_FALSE;
 }
 
 static const char *simdjson_get_error_msg(simdjson_encoder_error_code error_code) {
