@@ -85,6 +85,20 @@ static zend_always_inline bool simdjson_validate_depth(zend_long depth, const in
     return true;
 }
 
+static const char* simdjson_stream_mmap(php_stream *stream, size_t *mapped) {
+    if (!php_stream_mmap_possible(stream)) {
+        return NULL;
+    }
+    const char* p = php_stream_mmap_range(stream, stream->position, PHP_STREAM_MMAP_ALL, PHP_STREAM_MAP_MODE_SHARED_READONLY, mapped);
+
+    // Seek to end of mapped part of file
+    if (php_stream_seek(stream, *mapped, SEEK_CUR) != 0) {
+        php_stream_mmap_unmap(stream);
+        return NULL;
+    }
+    return p;
+}
+
 PHP_FUNCTION(simdjson_validate) {
     zend_string *json = NULL;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
@@ -250,47 +264,39 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         RETURN_THROWS();
     }
 
-    if (php_stream_mmap_possible(stream)) {
-        size_t mapped;
-        const char* p = php_stream_mmap_range(stream, php_stream_tell(stream), PHP_STREAM_MMAP_ALL, PHP_STREAM_MAP_MODE_SHARED_READONLY, &mapped);
-        if (EXPECTED(p)) {
-            simdjson_php_error_code error;
-            if (SIMDJSON_SHOULD_REUSE_PARSER(mapped)) {
-                error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), p, mapped, return_value, associative, depth);
-            } else {
-                simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
-                error = php_simdjson_parse_buffer(simdjson_php_parser, p, mapped, return_value, associative, depth);
-                php_simdjson_free_parser(simdjson_php_parser);
-            }
-            php_stream_mmap_unmap_ex(stream, mapped);
-            if (UNEXPECTED(error)) {
-                php_simdjson_throw_jsonexception(error);
-                RETURN_THROWS();
-            }
+    simdjson_php_error_code error;
+
+    const char* p = simdjson_stream_mmap(stream, &len);
+    if (p != NULL) {
+        if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
+            error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), p, len, return_value, associative, depth);
+        } else {
+            simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+            error = php_simdjson_parse_buffer(simdjson_php_parser, p, len, return_value, associative, depth);
+            php_simdjson_free_parser(simdjson_php_parser);
+        }
+        php_stream_mmap_unmap_ex(stream, len);
+    } else {
+        if ((json = simdjson_stream_copy_to_mem(stream, &len)) == NULL) {
+            php_simdjson_throw_jsonexception(simdjson::EMPTY);
+            RETURN_THROWS();
+        }
+
+        if (simdjson_simple_decode(json, len, return_value, associative)) {
+            efree(json);
             return;
         }
-    }
 
-    if ((json = simdjson_stream_copy_to_mem(stream, &len)) == NULL) {
-        php_simdjson_throw_jsonexception(simdjson::EMPTY);
-        RETURN_THROWS();
-    }
+        if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
+            error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), json, len, return_value, associative, depth);
+        } else {
+            simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+            error = php_simdjson_parse_buffer(simdjson_php_parser, json, len, return_value, associative, depth);
+            php_simdjson_free_parser(simdjson_php_parser);
+        }
 
-    if (simdjson_simple_decode(json, len, return_value, associative)) {
         efree(json);
-        return;
     }
-
-    simdjson_php_error_code error;
-    if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
-        error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), json, len, return_value, associative, depth);
-    } else {
-        simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
-        error = php_simdjson_parse_buffer(simdjson_php_parser, json, len, return_value, associative, depth);
-        php_simdjson_free_parser(simdjson_php_parser);
-    }
-
-    efree(json);
 
     if (UNEXPECTED(error)) {
         php_simdjson_throw_jsonexception(error);
