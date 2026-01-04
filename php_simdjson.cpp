@@ -85,7 +85,11 @@ static zend_always_inline bool simdjson_validate_depth(zend_long depth, const in
     return true;
 }
 
-static const char* simdjson_stream_mmap(php_stream *stream, size_t *mapped) {
+static const char* simdjson_stream_mmap(php_stream *stream, const php_stream_statbuf *ssbuf, size_t *mapped) {
+    // mmap has big overhead for small files, so use it just for files that are bigger than 64 kb
+    if (ssbuf->sb.st_size < 64 * 1024) {
+        return NULL;
+    }
     if (!php_stream_mmap_possible(stream)) {
         return NULL;
     }
@@ -190,13 +194,12 @@ PHP_FUNCTION(simdjson_decode) {
 
 // Simplified version of _php_stream_copy_to_mem that allways allocated string with required padding and returns
 // char* instead of of zend_string* to avoid unnecessary overhead
-static char *simdjson_stream_copy_to_mem(php_stream *src, size_t *len) {
+static char *simdjson_stream_copy_to_mem(php_stream *src, php_stream_statbuf *ssbuf, size_t *len) {
     ssize_t ret = 0;
     char *ptr;
     size_t buflen;
     int step = 8192;
     int min_room = 8192 / 4;
-    php_stream_statbuf ssbuf;
     char* result;
 
     /* avoid many reallocs by allocating a good-sized chunk to begin with, if
@@ -205,8 +208,8 @@ static char *simdjson_stream_copy_to_mem(php_stream *src, size_t *len) {
      * number of bytes that we can read.  In order to avoid an upsize followed
      * by a downsize of the buffer, overestimate by the step size (which is
      * 8K).  */
-    if (php_stream_stat(src, &ssbuf) == 0 && ssbuf.sb.st_size > 0) {
-        buflen = ZEND_MM_ALIGNED_SIZE(MAX(ssbuf.sb.st_size - src->position, 0)) + step;
+    if (ssbuf->sb.st_size > 0) {
+        buflen = ZEND_MM_ALIGNED_SIZE(MAX(ssbuf->sb.st_size - src->position, 0)) + step;
     } else {
         buflen = step;
     }
@@ -266,7 +269,10 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
 
     simdjson_php_error_code error;
 
-    const char* p = simdjson_stream_mmap(stream, &len);
+    php_stream_statbuf ssbuf;
+    php_stream_stat(stream, &ssbuf);
+
+    const char* p = simdjson_stream_mmap(stream, &ssbuf, &len);
     if (p != NULL) {
         if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
             error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), p, len, return_value, associative, depth);
@@ -277,7 +283,7 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         }
         php_stream_mmap_unmap_ex(stream, len);
     } else {
-        if ((json = simdjson_stream_copy_to_mem(stream, &len)) == NULL) {
+        if ((json = simdjson_stream_copy_to_mem(stream, &ssbuf, &len)) == NULL) {
             php_simdjson_throw_jsonexception(simdjson::EMPTY);
             RETURN_THROWS();
         }
