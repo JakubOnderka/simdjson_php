@@ -320,6 +320,7 @@ function simdjson_cleanup(): true {}
  *
  * @param string $string
  * @return bool
+ * @compile-time-eval
  */
 function simdjson_is_valid_utf8(string $string): bool {}
 
@@ -328,6 +329,7 @@ function simdjson_is_valid_utf8(string $string): bool {}
  *
  * @param string $string
  * @return int|bool
+ * @compile-time-eval
  */
 function simdjson_utf8_len(string $string): int|bool {}
 
@@ -392,8 +394,8 @@ final class SimdJsonBase64Encode implements JsonSerializable {
 
 /**
  * @param string $string
- * @param bool $strict
- * @param bool $url
+ * @param bool $strict If strict is set to true, validate encoded string padding
+ * @param bool $url Use base64url encoding according to RFC 4648 §5
  * @return string|false
  * @compile-time-eval
  */
@@ -401,7 +403,8 @@ function simdjson_base64_decode(string $string, bool $strict = false, bool $url 
 
 /**
  * @param string $string
- * @param bool $url
+ * @param bool $url Use base64url encoding according to RFC 4648 §5
  * @return string
+ * @compile-time-eval
  */
 function simdjson_base64_encode(string $string, bool $url = false): string {}

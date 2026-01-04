@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 7ce820f22756802ad80ce2070db55bb9663ddb8b */
+ * Stub hash: 38a41197d84e3f57b42f20604f36b2cf0d8928a9 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -113,12 +113,12 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_key_count, arginfo_simdjson_key_count)
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
 	ZEND_FE(simdjson_cleanup, arginfo_simdjson_cleanup)
-	ZEND_FE(simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8)
-	ZEND_FE(simdjson_utf8_len, arginfo_simdjson_utf8_len)
+	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8)
+	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_utf8_len, arginfo_simdjson_utf8_len)
 	ZEND_FE(simdjson_encode, arginfo_simdjson_encode)
 	ZEND_FE(simdjson_encode_to_stream, arginfo_simdjson_encode_to_stream)
 	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_base64_decode, arginfo_simdjson_base64_decode)
-	ZEND_FE(simdjson_base64_encode, arginfo_simdjson_base64_encode)
+	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_base64_encode, arginfo_simdjson_base64_encode)
 	ZEND_FE_END
 };
 
