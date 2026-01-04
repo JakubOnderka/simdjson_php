@@ -635,7 +635,7 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     RETURN_TRUE;
 }
 
-static zend_string* simjson_base64_encode(zend_string *binary_string, bool url) {
+static zend_string* simdjson_base64_encode(zend_string *binary_string, bool url) {
     auto options = url ? simdutf::base64_url : simdutf::base64_default;
     size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string), options);
     zend_string *result = zend_string_alloc(encoded_length, 0);
@@ -645,7 +645,7 @@ static zend_string* simjson_base64_encode(zend_string *binary_string, bool url) 
     return result;
 }
 
-static zend_always_inline size_t simsjson_base64_decoded_length(size_t input_length) {
+static zend_always_inline size_t simdjson_base64_decoded_length(size_t input_length) {
     return (input_length * 3 + 3) / 4;
 }
 
@@ -670,7 +670,7 @@ PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
     zend_string *binary_string = Z_STR_P(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 0));
     bool base64_url = Z_TYPE_INFO_P(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 1)) == IS_TRUE;
 
-    zend_string *output_string = simjson_base64_encode(binary_string, base64_url);
+    zend_string *output_string = simdjson_base64_encode(binary_string, base64_url);
     RETURN_NEW_STR(output_string);
 }
 
@@ -684,7 +684,7 @@ PHP_FUNCTION(simdjson_base64_encode) {
         Z_PARAM_BOOL(url)
     ZEND_PARSE_PARAMETERS_END();
 
-    zend_string *output_string = simjson_base64_encode(str, url);
+    zend_string *output_string = simdjson_base64_encode(str, url);
     RETURN_NEW_STR(output_string);
 }
 
@@ -702,7 +702,7 @@ PHP_FUNCTION(simdjson_base64_decode) {
     ZEND_PARSE_PARAMETERS_END();
 
     // Allocate maximum size that can be converted from base64 to binary string, we will set real length later
-    zend_string *output_string = zend_string_alloc(simsjson_base64_decoded_length(str_len), 0);
+    zend_string *output_string = zend_string_alloc(simdjson_base64_decoded_length(str_len), 0);
 
     auto last_chunk_handling = strict ? simdutf::last_chunk_handling_options::strict : simdutf::last_chunk_handling_options::loose;
     auto options = url ? simdutf::base64_url : simdutf::base64_default;
