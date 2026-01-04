@@ -389,3 +389,19 @@ final class SimdJsonBase64Encode implements JsonSerializable {
      */
     public function __toString(): string {}
 }
+
+/**
+ * @param string $string
+ * @param bool $strict
+ * @param bool $url
+ * @return string|false
+ * @compile-time-eval
+ */
+function simdjson_base64_decode(string $string, bool $strict = false, bool $url = false): string|false {}
+
+/**
+ * @param string $string
+ * @param bool $url
+ * @return string
+ */
+function simdjson_base64_encode(string $string, bool $url = false): string {}
