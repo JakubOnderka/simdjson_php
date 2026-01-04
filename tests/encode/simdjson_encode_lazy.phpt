@@ -2,7 +2,7 @@
 Test simdjson_encode() function : lazy objects
 --SKIPIF--
 <?php
-if (PHP_VERSION_ID < 80400) echo "skip deduplication is supported since PHP 8.4\n";
+if (PHP_VERSION_ID < 80400) echo "skip lazy objects are supported since PHP 8.4\n";
 ?>
 --FILE--
 <?php

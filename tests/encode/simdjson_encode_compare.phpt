@@ -8,10 +8,15 @@ foreach ($filesToCheck as $file) {
     $decoded = simdjson_decode(file_get_contents("jsonexamples/" . $file), true);
     $simdjsonEncoded = simdjson_encode($decoded);
     $stdEncoded = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    if ($stdEncoded !== $simdjsonEncoded) {
-        echo "Different!\n";
-    } else {
+
+    $decodedFromStream = simdjson_decode_from_stream(fopen("jsonexamples/" . $file, "r"), true);
+    $simdjsonEncodedFromStream = simdjson_encode($decoded);
+    $stdEncodedFromStream = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if ($stdEncoded === $simdjsonEncoded && $stdEncodedFromStream === $stdEncoded) {
         echo "OK\n";
+    } else {
+        echo "Different!\n";
     }
 }
 --EXPECT--
