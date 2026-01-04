@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 4abcefaf1ba05d4aa5116cee1d05a4df01f935a0 */
+ * Stub hash: 7ce820f22756802ad80ce2070db55bb9663ddb8b */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -64,6 +64,17 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_encode_to_stream, 0, 2,
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_simdjson_base64_decode, 0, 1, MAY_BE_STRING|MAY_BE_FALSE)
+	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, strict, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, url, _IS_BOOL, 0, "false")
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_base64_encode, 0, 1, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, url, _IS_BOOL, 0, "false")
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_SimdJsonBase64Encode___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, base64url, _IS_BOOL, 0, "false")
@@ -87,6 +98,8 @@ ZEND_FUNCTION(simdjson_is_valid_utf8);
 ZEND_FUNCTION(simdjson_utf8_len);
 ZEND_FUNCTION(simdjson_encode);
 ZEND_FUNCTION(simdjson_encode_to_stream);
+ZEND_FUNCTION(simdjson_base64_decode);
+ZEND_FUNCTION(simdjson_base64_encode);
 ZEND_METHOD(SimdJsonBase64Encode, __construct);
 ZEND_METHOD(SimdJsonBase64Encode, jsonSerialize);
 
@@ -104,6 +117,8 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_utf8_len, arginfo_simdjson_utf8_len)
 	ZEND_FE(simdjson_encode, arginfo_simdjson_encode)
 	ZEND_FE(simdjson_encode_to_stream, arginfo_simdjson_encode_to_stream)
+	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_base64_decode, arginfo_simdjson_base64_decode)
+	ZEND_FE(simdjson_base64_encode, arginfo_simdjson_base64_encode)
 	ZEND_FE_END
 };
 

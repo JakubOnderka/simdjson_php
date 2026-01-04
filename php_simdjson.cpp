@@ -44,6 +44,10 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 #include "src/simdjson.h"
 #include "src/simdutf.h"
 
+/* ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE is defined since PHP 8.2 */
+#ifndef ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE
+#define ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE ZEND_FE
+#endif
 #include "simdjson_arginfo.h"
 
 static zend_string *simdjson_json_empty_array;
@@ -631,6 +635,20 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     RETURN_TRUE;
 }
 
+static zend_string* simjson_base64_encode(zend_string *binary_string, bool url) {
+    auto options = url ? simdutf::base64_url : simdutf::base64_default;
+    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string), options);
+    zend_string *result = zend_string_alloc(encoded_length, 0);
+    simdutf::binary_to_base64(ZSTR_VAL(binary_string), ZSTR_LEN(binary_string), ZSTR_VAL(result), options);
+    ZSTR_VAL(result)[encoded_length] = '\0';
+    GC_ADD_FLAGS(result, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
+    return result;
+}
+
+static zend_always_inline size_t simsjson_base64_decoded_length(size_t input_length) {
+    return (input_length * 3 + 3) / 4;
+}
+
 PHP_METHOD(SimdJsonBase64Encode, __construct) {
     zend_string *binary_string = NULL;
     bool base64_url = false;
@@ -651,15 +669,53 @@ PHP_METHOD(SimdJsonBase64Encode, jsonSerialize) {
 
     zend_string *binary_string = Z_STR_P(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 0));
     bool base64_url = Z_TYPE_INFO_P(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 1)) == IS_TRUE;
-    auto options = base64_url ? simdutf::base64_url : simdutf::base64_default;
 
-    size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string), options);
-    zend_string *result = zend_string_alloc(encoded_length, 0);
-    simdutf::binary_to_base64(ZSTR_VAL(binary_string), ZSTR_LEN(binary_string), ZSTR_VAL(result), options);
-    ZSTR_VAL(result)[encoded_length] = '\0';
-    GC_ADD_FLAGS(result, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
+    zend_string *output_string = simjson_base64_encode(binary_string, base64_url);
+    RETURN_NEW_STR(output_string);
+}
 
-    RETURN_NEW_STR(result);
+PHP_FUNCTION(simdjson_base64_encode) {
+    zend_string *str;
+    bool url = false;
+
+    ZEND_PARSE_PARAMETERS_START(1, 2)
+        Z_PARAM_STR(str)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(url)
+    ZEND_PARSE_PARAMETERS_END();
+
+    zend_string *output_string = simjson_base64_encode(str, url);
+    RETURN_NEW_STR(output_string);
+}
+
+PHP_FUNCTION(simdjson_base64_decode) {
+    char *str;
+    size_t str_len;
+    bool strict = false;
+    bool url = false;
+
+    ZEND_PARSE_PARAMETERS_START(1, 3)
+        Z_PARAM_STRING(str, str_len)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(strict)
+        Z_PARAM_BOOL(url)
+    ZEND_PARSE_PARAMETERS_END();
+
+    // Allocate maximum size that can be converted from base64 to binary string, we will set real length later
+    zend_string *output_string = zend_string_alloc(simsjson_base64_decoded_length(str_len), 0);
+
+    auto last_chunk_handling = strict ? simdutf::last_chunk_handling_options::strict : simdutf::last_chunk_handling_options::loose;
+    auto options = url ? simdutf::base64_url : simdutf::base64_default;
+    simdutf::result result = simdutf::base64_to_binary(str, str_len, ZSTR_VAL(output_string), options, last_chunk_handling);
+
+    if (UNEXPECTED(result.error != simdutf::error_code::SUCCESS)) {
+        zend_string_efree(output_string);
+        RETURN_FALSE;
+    }
+
+    ZSTR_LEN(output_string) = result.count;
+    ZSTR_VAL(output_string)[result.count] = '\0';
+    RETURN_NEW_STR(output_string);
 }
 
 /** {{{ PHP_GINIT_FUNCTION
