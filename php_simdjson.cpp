@@ -86,8 +86,8 @@ static zend_always_inline bool simdjson_validate_depth(zend_long depth, const in
 }
 
 static const char* simdjson_stream_mmap(php_stream *stream, const php_stream_statbuf *ssbuf, size_t *mapped) {
-    // mmap has big overhead for small files, so use it just for files that are bigger than 64 kb
-    if (ssbuf->sb.st_size < 64 * 1024) {
+    // mmap has big overhead for small files, so use it just for files that are bigger than 1 MB
+    if (ssbuf->sb.st_size < SIMDJSON_CAPACITY_RECLAIM_THRESHOLD) {
         return NULL;
     }
     if (!php_stream_mmap_possible(stream)) {
@@ -274,13 +274,11 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
 
     const char* p = simdjson_stream_mmap(stream, &ssbuf, &len);
     if (p != NULL) {
-        if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
-            error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), p, len, return_value, associative, depth);
-        } else {
-            simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
-            error = php_simdjson_parse_buffer(simdjson_php_parser, p, len, return_value, associative, depth);
-            php_simdjson_free_parser(simdjson_php_parser);
-        }
+        // No need to call simdjson_simple_decode as we mmap only files bigger that 1 MB
+        // Also we don't need to check if we should reuse parser
+        simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+        error = php_simdjson_parse_buffer(simdjson_php_parser, p, len, return_value, associative, depth);
+        php_simdjson_free_parser(simdjson_php_parser);
         php_stream_mmap_unmap_ex(stream, len);
     } else {
         if ((json = simdjson_stream_copy_to_mem(stream, &ssbuf, &len)) == NULL) {
