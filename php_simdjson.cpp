@@ -44,10 +44,6 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 #include "src/simdjson.h"
 #include "src/simdutf.h"
 
-/* ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE is defined since PHP 8.2 */
-#ifndef ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE
-#define ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE ZEND_FE
-#endif
 #include "simdjson_arginfo.h"
 
 static zend_string *simdjson_json_empty_array;
