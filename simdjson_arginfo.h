@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 38a41197d84e3f57b42f20604f36b2cf0d8928a9 */
+ * Stub hash: 5f67e98176bf9f0dbb8f688e49f8acd4771d0698 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -86,7 +86,6 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonBase64Encode___toString, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
-
 ZEND_FUNCTION(simdjson_validate);
 ZEND_FUNCTION(simdjson_decode);
 ZEND_FUNCTION(simdjson_decode_from_stream);
@@ -103,45 +102,68 @@ ZEND_FUNCTION(simdjson_base64_encode);
 ZEND_METHOD(SimdJsonBase64Encode, __construct);
 ZEND_METHOD(SimdJsonBase64Encode, jsonSerialize);
 
-
 static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_validate, arginfo_simdjson_validate)
-	ZEND_FALIAS(simdjson_is_valid, simdjson_validate, arginfo_simdjson_is_valid)
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("simdjson_is_valid", zif_simdjson_validate, arginfo_simdjson_is_valid, 0, NULL, NULL)
+#else
+	ZEND_RAW_FENTRY("simdjson_is_valid", zif_simdjson_validate, arginfo_simdjson_is_valid, 0)
+#endif
 	ZEND_FE(simdjson_decode, arginfo_simdjson_decode)
 	ZEND_FE(simdjson_decode_from_stream, arginfo_simdjson_decode_from_stream)
 	ZEND_FE(simdjson_key_value, arginfo_simdjson_key_value)
 	ZEND_FE(simdjson_key_count, arginfo_simdjson_key_count)
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
 	ZEND_FE(simdjson_cleanup, arginfo_simdjson_cleanup)
-	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8)
-	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_utf8_len, arginfo_simdjson_utf8_len)
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+#else
+#if (PHP_VERSION_ID >= 80200)
+	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, ZEND_ACC_COMPILE_TIME_EVAL)
+#elif (PHP_VERSION_ID >= 80000)
+	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, 0)
+#endif
+#endif
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+#else
+#if (PHP_VERSION_ID >= 80200)
+	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, ZEND_ACC_COMPILE_TIME_EVAL)
+#elif (PHP_VERSION_ID >= 80000)
+	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, 0)
+#endif
+#endif
 	ZEND_FE(simdjson_encode, arginfo_simdjson_encode)
 	ZEND_FE(simdjson_encode_to_stream, arginfo_simdjson_encode_to_stream)
-	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_base64_decode, arginfo_simdjson_base64_decode)
-	ZEND_SUPPORTS_COMPILE_TIME_EVAL_FE(simdjson_base64_encode, arginfo_simdjson_base64_encode)
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+#else
+#if (PHP_VERSION_ID >= 80200)
+	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, ZEND_ACC_COMPILE_TIME_EVAL)
+#elif (PHP_VERSION_ID >= 80000)
+	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, 0)
+#endif
+#endif
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+#else
+#if (PHP_VERSION_ID >= 80200)
+	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, ZEND_ACC_COMPILE_TIME_EVAL)
+#elif (PHP_VERSION_ID >= 80000)
+	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, 0)
+#endif
+#endif
 	ZEND_FE_END
 };
-
-
-static const zend_function_entry class_SimdJsonException_methods[] = {
-	ZEND_FE_END
-};
-
-
-static const zend_function_entry class_SimdJsonDecoderException_methods[] = {
-	ZEND_FE_END
-};
-
-
-static const zend_function_entry class_SimdJsonEncoderException_methods[] = {
-	ZEND_FE_END
-};
-
 
 static const zend_function_entry class_SimdJsonBase64Encode_methods[] = {
 	ZEND_ME(SimdJsonBase64Encode, __construct, arginfo_class_SimdJsonBase64Encode___construct, ZEND_ACC_PUBLIC)
 	ZEND_ME(SimdJsonBase64Encode, jsonSerialize, arginfo_class_SimdJsonBase64Encode_jsonSerialize, ZEND_ACC_PUBLIC)
-	ZEND_MALIAS(SimdJsonBase64Encode, __toString, jsonSerialize, arginfo_class_SimdJsonBase64Encode___toString, ZEND_ACC_PUBLIC)
+#if (PHP_VERSION_ID >= 80400)
+	ZEND_RAW_FENTRY("__toString", zim_SimdJsonBase64Encode_jsonSerialize, arginfo_class_SimdJsonBase64Encode___toString, ZEND_ACC_PUBLIC, NULL, NULL)
+#else
+	ZEND_RAW_FENTRY("__toString", zim_SimdJsonBase64Encode_jsonSerialize, arginfo_class_SimdJsonBase64Encode___toString, ZEND_ACC_PUBLIC)
+#endif
 	ZEND_FE_END
 };
 
@@ -196,9 +218,13 @@ static zend_class_entry *register_class_SimdJsonException(zend_class_entry *clas
 {
 	zend_class_entry ce, *class_entry;
 
-	INIT_CLASS_ENTRY(ce, "SimdJsonException", class_SimdJsonException_methods);
+	INIT_CLASS_ENTRY(ce, "SimdJsonException", NULL);
+#if (PHP_VERSION_ID >= 80400)
+	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_RuntimeException, ZEND_ACC_ABSTRACT);
+#else
 	class_entry = zend_register_internal_class_ex(&ce, class_entry_RuntimeException);
 	class_entry->ce_flags |= ZEND_ACC_ABSTRACT;
+#endif
 
 	return class_entry;
 }
@@ -207,8 +233,12 @@ static zend_class_entry *register_class_SimdJsonDecoderException(zend_class_entr
 {
 	zend_class_entry ce, *class_entry;
 
-	INIT_CLASS_ENTRY(ce, "SimdJsonDecoderException", class_SimdJsonDecoderException_methods);
+	INIT_CLASS_ENTRY(ce, "SimdJsonDecoderException", NULL);
+#if (PHP_VERSION_ID >= 80400)
+	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_SimdJsonException, 0);
+#else
 	class_entry = zend_register_internal_class_ex(&ce, class_entry_SimdJsonException);
+#endif
 
 	return class_entry;
 }
@@ -217,8 +247,12 @@ static zend_class_entry *register_class_SimdJsonEncoderException(zend_class_entr
 {
 	zend_class_entry ce, *class_entry;
 
-	INIT_CLASS_ENTRY(ce, "SimdJsonEncoderException", class_SimdJsonEncoderException_methods);
+	INIT_CLASS_ENTRY(ce, "SimdJsonEncoderException", NULL);
+#if (PHP_VERSION_ID >= 80400)
+	class_entry = zend_register_internal_class_with_flags(&ce, class_entry_SimdJsonException, 0);
+#else
 	class_entry = zend_register_internal_class_ex(&ce, class_entry_SimdJsonException);
+#endif
 
 	return class_entry;
 }
@@ -228,8 +262,12 @@ static zend_class_entry *register_class_SimdJsonBase64Encode(zend_class_entry *c
 	zend_class_entry ce, *class_entry;
 
 	INIT_CLASS_ENTRY(ce, "SimdJsonBase64Encode", class_SimdJsonBase64Encode_methods);
+#if (PHP_VERSION_ID >= 80400)
+	class_entry = zend_register_internal_class_with_flags(&ce, NULL, ZEND_ACC_FINAL|ZEND_ACC_NO_DYNAMIC_PROPERTIES);
+#else
 	class_entry = zend_register_internal_class_ex(&ce, NULL);
 	class_entry->ce_flags |= ZEND_ACC_FINAL|ZEND_ACC_NO_DYNAMIC_PROPERTIES;
+#endif
 	zend_class_implements(class_entry, 1, class_entry_JsonSerializable);
 
 	zval property_string_default_value;
