@@ -420,6 +420,20 @@ PHP_FUNCTION(simdjson_cleanup) {
     RETURN_TRUE;
 }
 
+static bool simdjson_is_valid_utf8(zend_string* string) {
+    // If string was already successfully validated, just return true
+    if (ZSTR_IS_VALID_UTF8(string)) {
+        return true;
+    }
+
+    bool is_valid = simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
+    if (EXPECTED(is_valid)) {
+        // String is UTF-8 valid, so we can also set proper flag
+        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+    }
+    return is_valid;
+}
+
 PHP_FUNCTION(simdjson_is_valid_utf8) {
     zend_string *string;
 
@@ -427,17 +441,35 @@ PHP_FUNCTION(simdjson_is_valid_utf8) {
         Z_PARAM_STR(string)
     ZEND_PARSE_PARAMETERS_END();
 
-    // If string was already successfully validated, just return true
-    if (ZSTR_IS_VALID_UTF8(string)) {
-        RETURN_TRUE;
-    }
+    RETURN_BOOL(simdjson_is_valid_utf8(string));
+}
 
-    bool is_ok = simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
-    if (EXPECTED(is_ok)) {
+#ifdef ZEND_FRAMELESS_FUNCTION
+ZEND_FRAMELESS_FUNCTION(simdjson_is_valid_utf8, 1)
+{
+    zval str_tmp;
+    zend_string *string;
+
+    Z_FLF_PARAM_STR(1, string, str_tmp);
+
+    ZVAL_BOOL(return_value, simdjson_is_valid_utf8(string));
+
+flf_clean:
+    Z_FLF_PARAM_FREE_STR(1, str_tmp);
+}
+#endif
+
+static void simdjson_utf8_len(zend_string* string, zval* return_value) {
+    bool is_valid = ZSTR_IS_VALID_UTF8(string) || simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
+    if (EXPECTED(is_valid)) {
         // String is UTF-8 valid, so we can also set proper flag
         GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+        // Compute number of chars
+        ZVAL_LONG(return_value, simdutf::count_utf8(ZSTR_VAL(string), ZSTR_LEN(string)));
+    } else {
+        // Return false in case string is not UTF-8 valid
+        ZVAL_BOOL(return_value, false);
     }
-    RETURN_BOOL(is_ok);
 }
 
 PHP_FUNCTION(simdjson_utf8_len) {
@@ -447,17 +479,23 @@ PHP_FUNCTION(simdjson_utf8_len) {
 		Z_PARAM_STR(string)
 	ZEND_PARSE_PARAMETERS_END();
 
-    bool is_ok = ZSTR_IS_VALID_UTF8(string) || simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
-    if (EXPECTED(is_ok)) {
-        // String is UTF-8 valid, so we can also set proper flag
-        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
-        // Compute number of chars
-        RETURN_LONG(simdutf::count_utf8(ZSTR_VAL(string), ZSTR_LEN(string)));
-    }
-
-    // Return false in case string is not UTF-8 valid
-    RETURN_FALSE;
+    simdjson_utf8_len(string, return_value);
 }
+
+#ifdef ZEND_FRAMELESS_FUNCTION
+ZEND_FRAMELESS_FUNCTION(simdjson_utf8_len, 1)
+{
+    zval str_tmp;
+    zend_string *string;
+
+    Z_FLF_PARAM_STR(1, string, str_tmp);
+
+    simdjson_utf8_len(string, return_value);
+
+flf_clean:
+    Z_FLF_PARAM_FREE_STR(1, str_tmp);
+}
+#endif
 
 static const char *simdjson_get_error_msg(simdjson_encoder_error_code error_code) {
     switch(error_code) {
@@ -631,7 +669,7 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
     RETURN_TRUE;
 }
 
-static zend_string* simdjson_base64_encode(zend_string *binary_string, bool url) {
+static zend_string* simdjson_base64_encode(const zend_string *binary_string, bool url) {
     auto options = url ? simdutf::base64_url : simdutf::base64_default;
     size_t encoded_length = simdutf::base64_length_from_binary(ZSTR_LEN(binary_string), options);
     zend_string *result = zend_string_alloc(encoded_length, 0);
@@ -643,6 +681,24 @@ static zend_string* simdjson_base64_encode(zend_string *binary_string, bool url)
 
 static zend_always_inline size_t simdjson_base64_decoded_length(size_t input_length) {
     return (input_length * 3 + 3) / 4;
+}
+
+static zend_string* simdjson_base64_decode(const zend_string *string, bool strict, bool url) {
+    // Allocate maximum size that can be converted from base64 to binary string, we will set real length later
+    zend_string *output_string = zend_string_alloc(simdjson_base64_decoded_length(ZSTR_LEN(string)), 0);
+
+    auto last_chunk_handling = strict ? simdutf::last_chunk_handling_options::strict : simdutf::last_chunk_handling_options::loose;
+    auto options = url ? simdutf::base64_url : simdutf::base64_default;
+    simdutf::result result = simdutf::base64_to_binary(ZSTR_VAL(string), ZSTR_LEN(string), ZSTR_VAL(output_string), options, last_chunk_handling);
+
+    if (UNEXPECTED(result.error != simdutf::error_code::SUCCESS)) {
+        zend_string_efree(output_string);
+        return NULL;
+    }
+
+    ZSTR_LEN(output_string) = result.count;
+    ZSTR_VAL(output_string)[result.count] = '\0';
+    return output_string;
 }
 
 PHP_METHOD(SimdJsonBase64Encode, __construct) {
@@ -684,35 +740,60 @@ PHP_FUNCTION(simdjson_base64_encode) {
     RETURN_NEW_STR(output_string);
 }
 
+#ifdef ZEND_FRAMELESS_FUNCTION
+ZEND_FRAMELESS_FUNCTION(simdjson_base64_encode, 1)
+{
+    zval str_tmp;
+    zend_string *str;
+
+    Z_FLF_PARAM_STR(1, str, str_tmp);
+
+    ZVAL_NEW_STR(return_value, simdjson_base64_encode(str, false));
+
+flf_clean:
+    Z_FLF_PARAM_FREE_STR(1, str_tmp);
+}
+#endif
+
 PHP_FUNCTION(simdjson_base64_decode) {
-    char *str;
-    size_t str_len;
+    zend_string *str;
     bool strict = false;
     bool url = false;
 
     ZEND_PARSE_PARAMETERS_START(1, 3)
-        Z_PARAM_STRING(str, str_len)
+        Z_PARAM_STR(str)
         Z_PARAM_OPTIONAL
         Z_PARAM_BOOL(strict)
         Z_PARAM_BOOL(url)
     ZEND_PARSE_PARAMETERS_END();
 
-    // Allocate maximum size that can be converted from base64 to binary string, we will set real length later
-    zend_string *output_string = zend_string_alloc(simdjson_base64_decoded_length(str_len), 0);
-
-    auto last_chunk_handling = strict ? simdutf::last_chunk_handling_options::strict : simdutf::last_chunk_handling_options::loose;
-    auto options = url ? simdutf::base64_url : simdutf::base64_default;
-    simdutf::result result = simdutf::base64_to_binary(str, str_len, ZSTR_VAL(output_string), options, last_chunk_handling);
-
-    if (UNEXPECTED(result.error != simdutf::error_code::SUCCESS)) {
-        zend_string_efree(output_string);
+    zend_string *output_string = simdjson_base64_decode(str, strict, url);
+    if (UNEXPECTED(output_string == NULL)) {
         RETURN_FALSE;
     }
 
-    ZSTR_LEN(output_string) = result.count;
-    ZSTR_VAL(output_string)[result.count] = '\0';
     RETURN_NEW_STR(output_string);
 }
+
+#ifdef ZEND_FRAMELESS_FUNCTION
+ZEND_FRAMELESS_FUNCTION(simdjson_base64_decode, 1)
+{
+    zval str_tmp;
+    zend_string *str, *output_string;
+
+    Z_FLF_PARAM_STR(1, str, str_tmp);
+
+    output_string = simdjson_base64_decode(str, false, false);
+    if (UNEXPECTED(output_string == NULL)) {
+        ZVAL_BOOL(return_value, false);
+    } else {
+        ZVAL_NEW_STR(return_value, output_string);
+    }
+
+flf_clean:
+    Z_FLF_PARAM_FREE_STR(1, str_tmp);
+}
+#endif
 
 /** {{{ PHP_GINIT_FUNCTION
 */
