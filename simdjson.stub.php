@@ -324,6 +324,7 @@ function simdjson_cleanup(): true {}
  * @param string $string
  * @return bool
  * @compile-time-eval
+ * @frameless-function {"arity": 1}
  */
 function simdjson_is_valid_utf8(string $string): bool {}
 
@@ -333,6 +334,7 @@ function simdjson_is_valid_utf8(string $string): bool {}
  * @param string $string
  * @return int|bool
  * @compile-time-eval
+ * @frameless-function {"arity": 1}
  */
 function simdjson_utf8_len(string $string): int|bool {}
 
@@ -401,6 +403,7 @@ final class SimdJsonBase64Encode implements JsonSerializable {
  * @param bool $url Use base64url encoding according to RFC 4648 §5
  * @return string|false
  * @compile-time-eval
+ * @frameless-function {"arity": 1}
  */
 function simdjson_base64_decode(string $string, bool $strict = false, bool $url = false): string|false {}
 
@@ -409,5 +412,6 @@ function simdjson_base64_decode(string $string, bool $strict = false, bool $url 
  * @param bool $url Use base64url encoding according to RFC 4648 §5
  * @return string
  * @compile-time-eval
+ * @frameless-function {"arity": 1}
  */
 function simdjson_base64_encode(string $string, bool $url = false): string {}

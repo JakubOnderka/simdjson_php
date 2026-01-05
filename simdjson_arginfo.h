@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 5f67e98176bf9f0dbb8f688e49f8acd4771d0698 */
+ * Stub hash: 2d27ab9518f0dcbc3439f69fa211cf232cee8598 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -86,6 +86,39 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonBase64Encode___toString, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+
+#if (PHP_VERSION_ID >= 80400)
+ZEND_FRAMELESS_FUNCTION(simdjson_is_valid_utf8, 1);
+static const zend_frameless_function_info frameless_function_infos_simdjson_is_valid_utf8[] = {
+	{ (void*)ZEND_FRAMELESS_FUNCTION_NAME(simdjson_is_valid_utf8, 1), 1 },
+	{ 0 },
+};
+#endif
+
+#if (PHP_VERSION_ID >= 80400)
+ZEND_FRAMELESS_FUNCTION(simdjson_utf8_len, 1);
+static const zend_frameless_function_info frameless_function_infos_simdjson_utf8_len[] = {
+	{ (void*)ZEND_FRAMELESS_FUNCTION_NAME(simdjson_utf8_len, 1), 1 },
+	{ 0 },
+};
+#endif
+
+#if (PHP_VERSION_ID >= 80400)
+ZEND_FRAMELESS_FUNCTION(simdjson_base64_decode, 1);
+static const zend_frameless_function_info frameless_function_infos_simdjson_base64_decode[] = {
+	{ (void*)ZEND_FRAMELESS_FUNCTION_NAME(simdjson_base64_decode, 1), 1 },
+	{ 0 },
+};
+#endif
+
+#if (PHP_VERSION_ID >= 80400)
+ZEND_FRAMELESS_FUNCTION(simdjson_base64_encode, 1);
+static const zend_frameless_function_info frameless_function_infos_simdjson_base64_encode[] = {
+	{ (void*)ZEND_FRAMELESS_FUNCTION_NAME(simdjson_base64_encode, 1), 1 },
+	{ 0 },
+};
+#endif
+
 ZEND_FUNCTION(simdjson_validate);
 ZEND_FUNCTION(simdjson_decode);
 ZEND_FUNCTION(simdjson_decode_from_stream);
@@ -116,7 +149,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
 	ZEND_FE(simdjson_cleanup, arginfo_simdjson_cleanup)
 #if (PHP_VERSION_ID >= 80400)
-	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, ZEND_ACC_COMPILE_TIME_EVAL, frameless_function_infos_simdjson_is_valid_utf8, NULL)
 #else
 #if (PHP_VERSION_ID >= 80200)
 	ZEND_RAW_FENTRY("simdjson_is_valid_utf8", zif_simdjson_is_valid_utf8, arginfo_simdjson_is_valid_utf8, ZEND_ACC_COMPILE_TIME_EVAL)
@@ -125,7 +158,7 @@ static const zend_function_entry ext_functions[] = {
 #endif
 #endif
 #if (PHP_VERSION_ID >= 80400)
-	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, ZEND_ACC_COMPILE_TIME_EVAL, frameless_function_infos_simdjson_utf8_len, NULL)
 #else
 #if (PHP_VERSION_ID >= 80200)
 	ZEND_RAW_FENTRY("simdjson_utf8_len", zif_simdjson_utf8_len, arginfo_simdjson_utf8_len, ZEND_ACC_COMPILE_TIME_EVAL)
@@ -136,7 +169,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_encode, arginfo_simdjson_encode)
 	ZEND_FE(simdjson_encode_to_stream, arginfo_simdjson_encode_to_stream)
 #if (PHP_VERSION_ID >= 80400)
-	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, ZEND_ACC_COMPILE_TIME_EVAL, frameless_function_infos_simdjson_base64_decode, NULL)
 #else
 #if (PHP_VERSION_ID >= 80200)
 	ZEND_RAW_FENTRY("simdjson_base64_decode", zif_simdjson_base64_decode, arginfo_simdjson_base64_decode, ZEND_ACC_COMPILE_TIME_EVAL)
@@ -145,7 +178,7 @@ static const zend_function_entry ext_functions[] = {
 #endif
 #endif
 #if (PHP_VERSION_ID >= 80400)
-	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, ZEND_ACC_COMPILE_TIME_EVAL, NULL, NULL)
+	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, ZEND_ACC_COMPILE_TIME_EVAL, frameless_function_infos_simdjson_base64_encode, NULL)
 #else
 #if (PHP_VERSION_ID >= 80200)
 	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, ZEND_ACC_COMPILE_TIME_EVAL)
