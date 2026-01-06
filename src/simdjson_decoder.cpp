@@ -323,7 +323,7 @@ init_new_string:
         GC_SET_REFCOUNT(p->key, 2);
         p->h = ZSTR_H(p->key) = h;
         //ZVAL_NULL(&p->val); // we dont need set value to null, as we don't use it and destructor is set to NULL
-        nIndex = h | ht->nTableMask;
+        nIndex = h | /* ht->nTableMask */ HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
         Z_NEXT(p->val) = HT_HASH(ht, nIndex);
         HT_HASH(ht, nIndex) = HT_IDX_TO_HASH(idx);
         return p->key;
