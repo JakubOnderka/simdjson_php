@@ -267,15 +267,14 @@ static zend_always_inline void simdjson_dedup_key_strings_release(const HashTabl
     } while (++p != end);
 }
 
-static zend_always_inline void simdjson_dedup_key_strings_init(HashTable *ht) {
+static zend_always_inline void simdjson_dedup_key_strings_init(HashTable *ht, const char* dedup_key_strings_data) {
     if (UNEXPECTED(ht->nTableSize == 0)) {
         // zend_hash_init
         ht->nNumUsed = 0;
         ht->nTableSize = SIMDJSON_DEDUP_STRING_COUNT;
         // zend_hash_real_init_mixed
-        void *data = emalloc(HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT)));
         ht->nTableMask = HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT);
-        HT_SET_DATA_ADDR(ht, data);
+        HT_SET_DATA_ADDR(ht, dedup_key_strings_data);
         HT_HASH_RESET(ht);
     } else if (ht->nNumUsed > SIMDJSON_DEDUP_STRING_COUNT / 2) {
         // more than half of hash table is already full before decoding new structure, so we will make space for new keys
@@ -606,12 +605,9 @@ PHP_SIMDJSON_API simdjson_php_parser* php_simdjson_create_parser(void) /* {{{ */
 
 PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {{{ */ {
 #if PHP_VERSION_ID >= 80200
-    // Destroy dedup_key_strings hash if was allocated
-    if (parser->dedup_key_strings.nTableSize) {
-        if (parser->dedup_key_strings.nNumUsed) {
-            simdjson_dedup_key_strings_release(&parser->dedup_key_strings);
-        }
-        efree(HT_GET_DATA_ADDR(&parser->dedup_key_strings));
+    // Destroy dedup_key_strings hash if was used
+    if (parser->dedup_key_strings.nNumUsed) {
+        simdjson_dedup_key_strings_release(&parser->dedup_key_strings);
     }
 #endif
     delete parser;
@@ -620,7 +616,7 @@ PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {
 static simdjson_php_error_code simdjson_convert_element(simdjson::dom::element element, zval *return_value, bool associative, simdjson_php_parser *parser)  {
 #if PHP_VERSION_ID >= 80200
     // Allocate table for reusing already allocated keys
-    simdjson_dedup_key_strings_init(&parser->dedup_key_strings);
+    simdjson_dedup_key_strings_init(&parser->dedup_key_strings, parser->dedup_key_strings_data);
 #endif
     simdjson_php_error_code resp;
     if (associative) {
