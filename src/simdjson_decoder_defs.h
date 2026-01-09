@@ -24,6 +24,9 @@ public:
     simdjson::dom::parser parser;
     simdjson::ondemand::parser ondemand_parser;
     HashTable dedup_key_strings;
+#if PHP_VERSION_ID >= 80200
+    char dedup_key_strings_data[HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT))];
+#endif
 };
 
 #endif
