@@ -485,7 +485,7 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
         auto _new_end = _size + output; \
         if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
             ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s); \
-            smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
+            simdjson_smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
             output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
         } \
     } while (0); \
