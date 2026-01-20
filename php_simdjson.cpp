@@ -157,7 +157,7 @@ template <bool with_padding> static char *simdjson_stream_copy_to_mem(php_stream
 
 #ifdef ZEND_DEBUG
         // Set padding to zero to make valgrind happy
-        memset(ptr, 0, simdjson::SIMDJSON_PADDING);
+        memset(result + *len, 0, simdjson::SIMDJSON_PADDING);
 #endif
     }
 
