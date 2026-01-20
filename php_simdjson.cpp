@@ -202,6 +202,12 @@ static char *simdjson_stream_copy_to_mem(php_stream *src, php_stream_statbuf *ss
     int min_room = 8192 / 4;
     char* result;
 
+    /* disabling the read buffer allows doing the whole transfer
+       in just one read() system call */
+    if (php_stream_is(src, PHP_STREAM_IS_STDIO)) {
+        php_stream_set_option(src, PHP_STREAM_OPTION_READ_BUFFER, PHP_STREAM_BUFFER_NONE, NULL);
+    }
+
     /* avoid many reallocs by allocating a good-sized chunk to begin with, if
      * we can.  Note that the stream may be filtered, in which case the stat
      * result may be inaccurate, as the filter may inflate or deflate the
@@ -260,12 +266,12 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         Z_PARAM_LONG(depth)
     ZEND_PARSE_PARAMETERS_END();
 
-    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
-    php_stream_from_res(stream, Z_RES_P(res));
-
     if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
+
+    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
+    php_stream_from_res(stream, Z_RES_P(res));
 
     simdjson_php_error_code error;
 
