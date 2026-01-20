@@ -7,7 +7,7 @@ RUN apt-get update && \
 ARG PHP_VERSION=8.4.16
 RUN curl -L https://www.php.net/distributions/php-$PHP_VERSION.tar.xz | tar xJf - && \
     cd php-$PHP_VERSION && \
-    ./configure --enable-debug --without-sqlite3 --disable-pdo --disable-dom --disable-simplexml --without-pdo-sqlite && \
+    ./configure --enable-debug --without-sqlite3 --disable-pdo --disable-dom --disable-simplexml --disable-phar --without-pdo-sqlite && \
     make -j$(nproc) && \
     make install && \
     rm -rf /php-$PHP_VERSION
