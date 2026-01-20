@@ -85,9 +85,9 @@ static zend_always_inline bool simdjson_validate_depth(zend_long depth, const in
     return true;
 }
 
-static const char* simdjson_stream_mmap(php_stream *stream, const php_stream_statbuf *ssbuf, size_t *mapped) {
+static const char* simdjson_stream_mmap(php_stream *stream, size_t size, size_t *mapped) {
     // mmap has big overhead for small files, so use it just for files that are bigger than 1 MB
-    if (ssbuf->sb.st_size < SIMDJSON_CAPACITY_RECLAIM_THRESHOLD) {
+    if (size < SIMDJSON_CAPACITY_RECLAIM_THRESHOLD) {
         return NULL;
     }
     if (!php_stream_mmap_possible(stream)) {
@@ -101,6 +101,67 @@ static const char* simdjson_stream_mmap(php_stream *stream, const php_stream_sta
         return NULL;
     }
     return p;
+}
+
+// Simplified version of _php_stream_copy_to_mem that allways allocated string with required padding and returns
+// char* instead of of zend_string* to avoid unnecessary overhead
+template <bool with_padding> static char *simdjson_stream_copy_to_mem(php_stream *src, size_t size, size_t *len) {
+    ssize_t ret = 0;
+    char *ptr;
+    size_t buflen;
+    int step = 8192;
+    int min_room = 8192 / 4;
+    char* result;
+
+    /* disabling the read buffer allows doing the whole transfer
+       in just one read() system call */
+    if (php_stream_is(src, PHP_STREAM_IS_STDIO)) {
+        php_stream_set_option(src, PHP_STREAM_OPTION_READ_BUFFER, PHP_STREAM_BUFFER_NONE, NULL);
+    }
+
+    /* avoid many reallocs by allocating a good-sized chunk to begin with, if
+     * we can.  Note that the stream may be filtered, in which case the stat
+     * result may be inaccurate, as the filter may inflate or deflate the
+     * number of bytes that we can read.  In order to avoid an upsize followed
+     * by a downsize of the buffer, overestimate by the step size (which is
+     * 8K).  */
+    if (size > 0) {
+        buflen = ZEND_MM_ALIGNED_SIZE(MAX(size - src->position, 0)) + step;
+    } else {
+        buflen = step;
+    }
+
+    result = (char*) emalloc(buflen);
+    ptr = result;
+
+    while ((ret = php_stream_read(src, ptr, buflen - *len)) > 0) {
+        *len += ret;
+        if (*len + min_room >= buflen) {
+            buflen += step;
+            result = (char*) erealloc(result, buflen);
+            ptr = result + *len;
+        } else {
+            ptr += ret;
+        }
+    }
+
+    if (*len == 0) {
+        efree(result);
+        return NULL;
+    }
+
+    if (with_padding) {
+        if (UNEXPECTED(*len + simdjson::SIMDJSON_PADDING > buflen)) {
+            result = (char*) erealloc(result, ZEND_MM_ALIGNED_SIZE(*len + simdjson::SIMDJSON_PADDING));
+        }
+
+#ifdef ZEND_DEBUG
+        // Set padding to zero to make valgrind happy
+        memset(ptr, 0, simdjson::SIMDJSON_PADDING);
+#endif
+    }
+
+    return result;
 }
 
 PHP_FUNCTION(simdjson_validate) {
@@ -192,65 +253,6 @@ PHP_FUNCTION(simdjson_decode) {
     }
 }
 
-// Simplified version of _php_stream_copy_to_mem that allways allocated string with required padding and returns
-// char* instead of of zend_string* to avoid unnecessary overhead
-static char *simdjson_stream_copy_to_mem(php_stream *src, php_stream_statbuf *ssbuf, size_t *len) {
-    ssize_t ret = 0;
-    char *ptr;
-    size_t buflen;
-    int step = 8192;
-    int min_room = 8192 / 4;
-    char* result;
-
-    /* disabling the read buffer allows doing the whole transfer
-       in just one read() system call */
-    if (php_stream_is(src, PHP_STREAM_IS_STDIO)) {
-        php_stream_set_option(src, PHP_STREAM_OPTION_READ_BUFFER, PHP_STREAM_BUFFER_NONE, NULL);
-    }
-
-    /* avoid many reallocs by allocating a good-sized chunk to begin with, if
-     * we can.  Note that the stream may be filtered, in which case the stat
-     * result may be inaccurate, as the filter may inflate or deflate the
-     * number of bytes that we can read.  In order to avoid an upsize followed
-     * by a downsize of the buffer, overestimate by the step size (which is
-     * 8K).  */
-    if (ssbuf->sb.st_size > 0) {
-        buflen = ZEND_MM_ALIGNED_SIZE(MAX(ssbuf->sb.st_size - src->position, 0)) + step;
-    } else {
-        buflen = step;
-    }
-
-    result = (char*) emalloc(buflen);
-    ptr = result;
-
-    while ((ret = php_stream_read(src, ptr, buflen - *len)) > 0) {
-        *len += ret;
-        if (*len + min_room >= buflen) {
-            buflen += step;
-            result = (char*) erealloc(result, buflen);
-            ptr = result + *len;
-        } else {
-            ptr += ret;
-        }
-    }
-
-    if (*len == 0) {
-        efree(result);
-        return NULL;
-    }
-
-    if (UNEXPECTED(*len + simdjson::SIMDJSON_PADDING > buflen)) {
-        result = (char*) erealloc(result, ZEND_MM_ALIGNED_SIZE(*len + simdjson::SIMDJSON_PADDING));
-    }
-
-#ifdef ZEND_DEBUG
-    // Set padding to zero to make valgrind happy
-    memset(ptr, 0, simdjson::SIMDJSON_PADDING);
-#endif
-
-    return result;
-}
-
 PHP_FUNCTION(simdjson_decode_from_stream) {
     zval *res;
     zend_bool associative = 0;
@@ -278,7 +280,7 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
     php_stream_statbuf ssbuf;
     php_stream_stat(stream, &ssbuf);
 
-    const char* p = simdjson_stream_mmap(stream, &ssbuf, &len);
+    const char* p = simdjson_stream_mmap(stream, ssbuf.sb.st_size, &len);
     if (p != NULL) {
         // No need to call simdjson_simple_decode as we mmap only files bigger that 1 MB
         // Also we don't need to check if we should reuse parser
@@ -287,7 +289,7 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         php_simdjson_free_parser(simdjson_php_parser);
         php_stream_mmap_unmap_ex(stream, len);
     } else {
-        if ((json = simdjson_stream_copy_to_mem(stream, &ssbuf, &len)) == NULL) {
+        if ((json = simdjson_stream_copy_to_mem<true>(stream, ssbuf.sb.st_size, &len)) == NULL) {
             php_simdjson_throw_jsonexception(simdjson::EMPTY);
             RETURN_THROWS();
         }
