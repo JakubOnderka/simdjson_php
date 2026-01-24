@@ -416,3 +416,11 @@ function simdjson_base64_decode(string $string, bool $strict = false, bool $url 
  * @frameless-function {"arity": 1}
  */
 function simdjson_base64_encode(string $string, bool $url = false, int $line_length = 0): string {}
+
+/**
+ * @param resource $res
+ * @param bool $url Use base64url encoding according to RFC 4648 §5
+ * @param int $line_length
+ * @return string
+ */
+function simdjson_base64_encode_from_stream($res, bool $url = false, int $line_length = 0): string {}

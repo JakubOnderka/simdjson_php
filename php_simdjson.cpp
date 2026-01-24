@@ -55,6 +55,13 @@ ZEND_DECLARE_MODULE_GLOBALS(simdjson);
 
 #define SIMDJSON_CAPACITY_RECLAIM_THRESHOLD 1024 * 1024 * 1 // 1MB
 #define SIMDJSON_SHOULD_REUSE_PARSER(zstr_len) EXPECTED(zstr_len <= SIMDJSON_CAPACITY_RECLAIM_THRESHOLD)
+#define SIMDJSON_PARAM_STREAM(stream) \
+    do { \
+    zval *res; \
+    Z_PARAM_RESOURCE(res); \
+    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE); \
+    php_stream_from_res(stream, Z_RES_P(res)); \
+    } while (0);
 
 // Get parser that can be reused multiple times to avoid allocation and deallocation
 static simdjson_php_parser *simdjson_get_reused_parser() {
@@ -254,7 +261,6 @@ PHP_FUNCTION(simdjson_decode) {
 }
 
 PHP_FUNCTION(simdjson_decode_from_stream) {
-    zval *res;
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
     php_stream *stream;
@@ -262,7 +268,7 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
     size_t len = 0;
 
     ZEND_PARSE_PARAMETERS_START(1, 3)
-        Z_PARAM_RESOURCE(res)
+        SIMDJSON_PARAM_STREAM(stream)
         Z_PARAM_OPTIONAL
         Z_PARAM_BOOL(associative)
         Z_PARAM_LONG(depth)
@@ -271,9 +277,6 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
     if (!simdjson_validate_depth(depth, 3)) {
         RETURN_THROWS();
     }
-
-    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
-    php_stream_from_res(stream, Z_RES_P(res));
 
     simdjson_php_error_code error;
 
@@ -631,7 +634,6 @@ PHP_FUNCTION(simdjson_encode) {
 }
 
 PHP_FUNCTION(simdjson_encode_to_stream) {
-    zval *res;
     zval *parameter;
     simdjson_encoder encoder = {0};
     smart_str buf = {0};
@@ -641,14 +643,11 @@ PHP_FUNCTION(simdjson_encode_to_stream) {
 
     ZEND_PARSE_PARAMETERS_START(2, 4)
         Z_PARAM_ZVAL(parameter)
-        Z_PARAM_RESOURCE(res)
+        SIMDJSON_PARAM_STREAM(stream)
         Z_PARAM_OPTIONAL
         Z_PARAM_LONG(options)
         Z_PARAM_LONG(depth)
     ZEND_PARSE_PARAMETERS_END();
-
-    ZEND_ASSERT(Z_TYPE_P(res) == IS_RESOURCE);
-    php_stream_from_res(stream, Z_RES_P(res));
 
     if (!simdjson_validate_encode_depth(depth, 4)) {
         RETURN_THROWS();
@@ -780,6 +779,66 @@ flf_clean:
     Z_FLF_PARAM_FREE_STR(1, str_tmp);
 }
 #endif
+
+PHP_FUNCTION(simdjson_base64_encode_from_stream) {
+    php_stream *stream;
+    bool url = false;
+    zend_long line_length = 0;
+    zend_string *output_string;
+    char *str;
+    size_t len = 0;
+    size_t encoded_length = 0;
+
+    ZEND_PARSE_PARAMETERS_START(1, 3)
+        SIMDJSON_PARAM_STREAM(stream)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(url)
+        Z_PARAM_LONG(line_length)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (UNEXPECTED(line_length < 0)) {
+        zend_argument_value_error(3, "must be greater than 0");
+        RETURN_THROWS();
+    }
+
+    auto options = url ? simdutf::base64_url : simdutf::base64_default;
+
+    php_stream_statbuf ssbuf;
+    php_stream_stat(stream, &ssbuf);
+
+    const char* p = simdjson_stream_mmap(stream, ssbuf.sb.st_size, &len);
+    if (p != NULL) {
+        if (line_length) {
+            encoded_length = simdutf::base64_length_from_binary_with_lines(len, options, line_length);
+            output_string = zend_string_alloc(encoded_length, 0);
+            simdutf::binary_to_base64_with_lines(p, len, ZSTR_VAL(output_string), line_length, options);
+        } else {
+            encoded_length = simdutf::base64_length_from_binary(len, options);
+            output_string = zend_string_alloc(encoded_length, 0);
+            simdutf::binary_to_base64(p, len, ZSTR_VAL(output_string), options);
+        }
+        php_stream_mmap_unmap_ex(stream, len);
+    } else {
+        if (UNEXPECTED((str = simdjson_stream_copy_to_mem<false>(stream, ssbuf.sb.st_size, &len)) == NULL)) {
+            RETURN_EMPTY_STRING(); // return false?
+        }
+
+        if (line_length) {
+            encoded_length = simdutf::base64_length_from_binary_with_lines(len, options, line_length);
+            output_string = zend_string_alloc(encoded_length, 0);
+            simdutf::binary_to_base64_with_lines(str, len, ZSTR_VAL(output_string), line_length, options);
+        } else {
+            encoded_length = simdutf::base64_length_from_binary(len, options);
+            output_string = zend_string_alloc(encoded_length, 0);
+            simdutf::binary_to_base64(str, len, ZSTR_VAL(output_string), options);
+        }
+        efree(str);
+    }
+
+    ZSTR_VAL(output_string)[encoded_length] = '\0';
+    GC_ADD_FLAGS(output_string, IS_STR_VALID_UTF8); // base64 encoded string must be always valid UTF-8 string
+    RETURN_NEW_STR(output_string);
+}
 
 PHP_FUNCTION(simdjson_base64_decode) {
     zend_string *str;

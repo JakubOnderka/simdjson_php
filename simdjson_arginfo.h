@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: ec8a0fc5d7dc67c200e6def3e324985ff9d5388d */
+ * Stub hash: 8f96023e503122e96a0f0cd08936d7477e8469d5 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -76,6 +76,12 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_base64_encode, 0, 1, IS
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, line_length, IS_LONG, 0, "0")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_base64_encode_from_stream, 0, 1, IS_STRING, 0)
+	ZEND_ARG_INFO(0, res)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, url, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, line_length, IS_LONG, 0, "0")
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_SimdJsonBase64Encode___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, base64url, _IS_BOOL, 0, "false")
@@ -133,6 +139,7 @@ ZEND_FUNCTION(simdjson_encode);
 ZEND_FUNCTION(simdjson_encode_to_stream);
 ZEND_FUNCTION(simdjson_base64_decode);
 ZEND_FUNCTION(simdjson_base64_encode);
+ZEND_FUNCTION(simdjson_base64_encode_from_stream);
 ZEND_METHOD(SimdJsonBase64Encode, __construct);
 ZEND_METHOD(SimdJsonBase64Encode, jsonSerialize);
 
@@ -187,6 +194,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_RAW_FENTRY("simdjson_base64_encode", zif_simdjson_base64_encode, arginfo_simdjson_base64_encode, 0)
 #endif
 #endif
+	ZEND_FE(simdjson_base64_encode_from_stream, arginfo_simdjson_base64_encode_from_stream)
 	ZEND_FE_END
 };
 
