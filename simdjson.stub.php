@@ -224,6 +224,11 @@ const SIMDJSON_ERR_KEY_COUNT_NOT_COUNTABLE = UNKNOWN;
  * @cvalue SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY
  */
 const SIMDJSON_ERR_INVALID_PROPERTY = UNKNOWN;
+/**
+ * @var int
+ * @cvalue SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS
+ */
+const SIMDJSON_ERR_INPUT_SIZE_EXCEEDS = UNKNOWN;
 
 function simdjson_validate(string $json, int $depth = 512): bool {}
 
@@ -267,6 +272,17 @@ function simdjson_decode(string $json, bool $associative = false, int $depth = 5
  * @throws ValueError for invalid $depth
  */
 function simdjson_decode_from_stream($res, bool $associative = false, int $depth = 512): mixed {}
+
+/**
+ * @param bool $associative When true, JSON objects will be returned as associative arrays.
+ *                          When false, JSON objects will be returned as objects.
+ * @param int $depth the maximum nesting depth of the structure being decoded.
+ * @return array|stdClass|string|float|int|bool|null
+ * @throws SimdJsonDecoderException for invalid JSON
+ *                           (or JSON over 4GB long, or out of range integer/float)
+ * @throws ValueError for invalid $depth
+ */
+function simdjson_decode_from_input(bool $associative = false, int $depth = 512): mixed {}
 
 /**
  * Returns the value at the json pointer $key

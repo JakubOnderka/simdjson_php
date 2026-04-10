@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: 8f96023e503122e96a0f0cd08936d7477e8469d5 */
+ * Stub hash: c60ee2838994f661b6f698d646f061140685fac6 */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -16,6 +16,11 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_decode_from_stream, 0, 1, IS_MIXED, 0)
 	ZEND_ARG_INFO(0, res)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_decode_from_input, 0, 0, IS_MIXED, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
 ZEND_END_ARG_INFO()
@@ -129,6 +134,7 @@ static const zend_frameless_function_info frameless_function_infos_simdjson_base
 ZEND_FUNCTION(simdjson_validate);
 ZEND_FUNCTION(simdjson_decode);
 ZEND_FUNCTION(simdjson_decode_from_stream);
+ZEND_FUNCTION(simdjson_decode_from_input);
 ZEND_FUNCTION(simdjson_key_value);
 ZEND_FUNCTION(simdjson_key_count);
 ZEND_FUNCTION(simdjson_key_exists);
@@ -152,6 +158,7 @@ static const zend_function_entry ext_functions[] = {
 #endif
 	ZEND_FE(simdjson_decode, arginfo_simdjson_decode)
 	ZEND_FE(simdjson_decode_from_stream, arginfo_simdjson_decode_from_stream)
+	ZEND_FE(simdjson_decode_from_input, arginfo_simdjson_decode_from_input)
 	ZEND_FE(simdjson_key_value, arginfo_simdjson_key_value)
 	ZEND_FE(simdjson_key_count, arginfo_simdjson_key_count)
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
@@ -254,6 +261,7 @@ static void register_simdjson_symbols(int module_number)
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_TRAILING_CONTENT", simdjson::TRAILING_CONTENT, CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_KEY_COUNT_NOT_COUNTABLE", SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE, CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_INVALID_PROPERTY", SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY, CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_INPUT_SIZE_EXCEEDS", SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS, CONST_PERSISTENT);
 }
 
 static zend_class_entry *register_class_SimdJsonException(zend_class_entry *class_entry_RuntimeException)
