@@ -27,6 +27,7 @@
 #define SIMDJSON_PHP_ERR_SUCCESS 0
 #define SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY 255
 #define SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE 254
+#define SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS 253
 
 /*
  * Put all of the publicly visible functionality and macros into the same header file

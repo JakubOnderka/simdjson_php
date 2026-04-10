@@ -319,6 +319,118 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
     }
 }
 
+static bool simdjson_decode_from_input_check_max_size(size_t len) {
+    if (UNEXPECTED(SG(post_max_size) > 0 && len > SG(post_max_size))) {
+        zend_throw_exception_ex(simdjson_decoder_exception_ce, SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS,
+            "POST Content-Length of " ZEND_LONG_FMT " bytes exceeds the limit of " ZEND_LONG_FMT " bytes",
+            len, SG(post_max_size)
+        );
+        return true;
+    }
+    return false;
+}
+
+PHP_FUNCTION(simdjson_decode_from_input) {
+    zend_bool associative = 0;
+    zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
+    char *json;
+    size_t len = 0;
+
+    ZEND_PARSE_PARAMETERS_START(0, 2)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(associative)
+        Z_PARAM_LONG(depth)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (!simdjson_validate_depth(depth, 2)) {
+        RETURN_THROWS();
+    }
+
+    simdjson_php_error_code error;
+    php_stream *body;
+
+    if ((body = SG(request_info).request_body)) { // request body was already processed
+        if (SG(read_post_bytes) == 0) {
+            php_simdjson_throw_jsonexception(simdjson::EMPTY);
+            RETURN_THROWS();
+        }
+
+        if (simdjson_decode_from_input_check_max_size(SG(read_post_bytes))) {
+            RETURN_THROWS();
+        }
+
+        // rewind to start of the request
+        php_stream_rewind(body);
+
+        // copy stream to memory
+        if ((json = simdjson_stream_copy_to_mem<true>(body, SG(read_post_bytes), &len)) == NULL) {
+            php_simdjson_throw_jsonexception(simdjson::EMPTY);
+            RETURN_THROWS();
+        }
+    } else {
+        if (SG(request_info).content_length == 0) {
+            php_simdjson_throw_jsonexception(simdjson::EMPTY);
+            RETURN_THROWS();
+        } else if (SG(request_info).content_length < 0) {
+            // I am not sure if content-length can be negative, so for now just throw exception
+            zend_throw_exception(simdjson_decoder_exception_ce, "POST Content-Length is required", SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS);
+            RETURN_THROWS();
+        } else if (SG(request_info).content_length > 0xFFFFFFFF) {
+            php_simdjson_throw_jsonexception(simdjson::CAPACITY);
+            RETURN_THROWS();
+        }
+
+        if (simdjson_decode_from_input_check_max_size(SG(request_info).content_length)) {
+            RETURN_THROWS();
+        }
+
+        body = php_stream_temp_create_ex(TEMP_STREAM_DEFAULT, SAPI_POST_BLOCK_SIZE * 4, PG(upload_tmp_dir));
+        SG(request_info).request_body = body;
+
+        // allocate buffer for whole request with padding
+        json = (char*) emalloc(SG(request_info).content_length + simdjson::SIMDJSON_PADDING);
+
+        // read data from sapi, read one byte more so we can check if provided data exceeds content-length
+        len = sapi_read_post_block(json, SG(request_info).content_length + 1);
+
+        if (UNEXPECTED(len > SG(request_info).content_length)) {
+            efree(json);
+            zend_throw_exception_ex(simdjson_decoder_exception_ce, SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS,
+                "Actual POST length does not match Content-Length, and exceeds " ZEND_LONG_FMT " bytes",
+                SG(request_info).content_length
+            );
+            RETURN_THROWS();
+        }
+
+        // write whole input buffer also to request_body, so it can be read later
+        if (php_stream_write(body, json, len) != len) {
+            php_stream_truncate_set_size(body, 0);
+            php_error_docref(NULL, E_WARNING, "POST data can't be buffered; all data discarded");
+        }
+        php_stream_rewind(body);
+    }
+
+    if (simdjson_simple_decode(json, len, return_value, associative)) {
+        efree(json);
+        return;
+    }
+
+    if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
+        error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), json, len, return_value, associative, depth);
+    } else {
+        simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+        error = php_simdjson_parse_buffer(simdjson_php_parser, json, len, return_value, associative, depth);
+        php_simdjson_free_parser(simdjson_php_parser);
+    }
+
+    efree(json);
+
+    if (UNEXPECTED(error)) {
+        php_simdjson_throw_jsonexception(error);
+        RETURN_THROWS();
+    }
+}
+
 PHP_FUNCTION(simdjson_key_value) {
     zend_string *json = NULL;
     zend_string *key = NULL;
