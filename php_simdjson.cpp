@@ -359,6 +359,36 @@ PHP_FUNCTION(simdjson_decode_from_input) {
             RETURN_THROWS();
         }
 
+#if PHP_VERSION_ID >= 80200
+        struct simdjson_php_stream_temp_data {
+        	php_stream *innerstream;
+        };
+
+        ZEND_ASSERT(php_stream_is(body, PHP_STREAM_IS_TEMP));
+        simdjson_php_stream_temp_data *ts = (simdjson_php_stream_temp_data*)body->abstract;
+        ZEND_ASSERT(ts != NULL);
+        ZEND_ASSERT(ts->innerstream != NULL);
+        if (php_stream_is(ts->innerstream, PHP_STREAM_IS_MEMORY)) {
+            // whole body is in memory, so we can just read stream buffer without allocating new buffer
+            zend_string *membuf = php_stream_memory_get_buffer(ts->innerstream);
+            if (simdjson_simple_decode(ZSTR_VAL(membuf), ZSTR_LEN(membuf), return_value, associative)) {
+                return;
+            }
+            if (SIMDJSON_SHOULD_REUSE_PARSER(ZSTR_LEN(membuf))) {
+                error = php_simdjson_parse(simdjson_get_reused_parser(), membuf, return_value, associative, depth);
+            } else {
+                simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+                error = php_simdjson_parse(simdjson_php_parser, membuf, return_value, associative, depth);
+                php_simdjson_free_parser(simdjson_php_parser);
+            }
+            if (UNEXPECTED(error)) {
+                php_simdjson_throw_jsonexception(error);
+                RETURN_THROWS();
+            }
+            return;
+        }
+#endif
+
         // rewind to start of the request
         php_stream_rewind(body);
 
