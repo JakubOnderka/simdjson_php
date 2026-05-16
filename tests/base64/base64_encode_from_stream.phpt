@@ -6,10 +6,10 @@ $memoryStream = fopen("php://memory", "rw");
 fwrite($memoryStream, "ahoj");
 fseek($memoryStream, 0);
 $encoded = simdjson_base64_encode_from_stream($memoryStream);
-echo $encoded . "\n";
+var_dump($encoded);
 $decoded = simdjson_base64_decode($encoded);
-echo $decoded . "\n";
+var_dump($decoded);
 ?>
 --EXPECT--
-YWhvag==
-ahoj
+string(8) "YWhvag=="
+string(4) "ahoj"

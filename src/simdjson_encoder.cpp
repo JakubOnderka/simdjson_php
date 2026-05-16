@@ -106,6 +106,271 @@ static inline void simdjson_append_number_index(smart_str *buf, zend_ulong index
     ZSTR_LEN(buf->s) += chars + 2;
 }
 
+static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
+	auto append = simdjson_escape[c];
+	memcpy(buf, append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
+	return append.len;
+}
+
+#define SIDMJSON_ZSTR_ALLOC(_size) \
+    do { \
+        auto _new_end = _size + output; \
+        if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
+            ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s); \
+            simdjson_smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
+            output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
+        } \
+    } while (0); \
+
+#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+template<typename T>
+static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
+    T chunk;
+    const char* start = s;
+    const size_t vlen = len & (int) (~(sizeof(chunk) - 1)); // max length that can be processed in chunk mode
+    char *output;
+
+	output = simdjson_smart_str_alloc(buf, len + 2);
+    *output++ = '"';
+
+    // Iterate input string in chunks
+	while (s < start + vlen) {
+		// Load chars to vector
+		chunk.load((const uint8_t *) s);
+		// Check chunk if contains char that needs to be escaped
+        auto needs_escaping = chunk.needs_escaping();
+		if (EXPECTED(!needs_escaping)) {
+            // If no escape char found, store chunk in output buffer and move buffer pointer
+            ZEND_ASSERT(output + sizeof(chunk) <= ZSTR_VAL(buf->s) + buf->a);
+			chunk.store((uint8_t*)output);
+            output += sizeof(chunk);
+            s += sizeof(chunk);
+		} else {
+            // Allocate enough space for escaped chunk + space for rest of unescaped string
+            SIDMJSON_ZSTR_ALLOC((sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH) + (start + len - s));
+            // Copy first bytes that do not need escaping in chunk without checking
+            auto j = chunk.escape_index(needs_escaping);
+            memcpy(output, s, j);
+            output += j;
+            s += j;
+
+            // Process rest of chunk char by char and escape required char
+            for (; j < sizeof(chunk); j++) {
+                char c = *s++;
+                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                    *output++ = c;
+                } else {
+                    output += simdjson_append_escape(output, c);
+                }
+            }
+        }
+	}
+
+    // Ensure that buf contains enough space that we can call unsafe methods
+    SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
+
+    // Finish last chars of string
+    while (s < start + len) {
+		char c = *s++;
+		if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+			*output++ = c;
+		} else {
+			output += simdjson_append_escape(output, c);
+		}
+	}
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
+}
+#endif
+
+#ifdef __SSE2__
+static zend_always_inline bool simdjson_avx2_supported() {
+#ifdef __AVX2__
+    return true;
+#endif
+
+    return __builtin_cpu_supports("avx2"); // check support in runtime
+}
+
+TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
+	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
+}
+#endif
+
+static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
+    const char *end = s + len;
+
+    // For short strings allocate maximum possible string length, so we can write directly to output buffer
+    char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
+
+    *output++ = '"';
+    while (s < end) {
+        char c = *s++;
+        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+            *output++ = c;
+        } else {
+            output += simdjson_append_escape(output, c);
+        }
+    }
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
+}
+
+/* valid as single byte character or leading byte */
+#define utf8_lead(c)  ((c) < 0x80 || ((c) >= 0xC2 && (c) <= 0xF4))
+/* whether it's actually valid depends on other stuff;
+ * this macro cannot check for non-shortest forms, surrogates or
+ * code points above 0x10FFFF */
+#define utf8_trail(c) ((c) >= 0x80 && (c) <= 0xBF)
+
+// Simplified version of php_next_utf8_char
+static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
+	if (str_len < 1)
+		return 1;
+
+    /* We'll follow strategy 2. from section 3.6.1 of UTR #36:
+     * "In a reported illegal byte sequence, do not include any
+     *  non-initial byte that encodes a valid character or is a leading
+     *  byte for a valid sequence." */
+    unsigned char c;
+    c = str[0];
+    if (c < 0x80 || c < 0xc2) {
+        return 1;
+    } else if (c < 0xe0) {
+        if (str_len < 2)
+            return 1;
+
+        if (!utf8_trail(str[1])) {
+            return utf8_lead(str[1]) ? 1 : 2;
+        }
+        return 2;
+    } else if (c < 0xf0) {
+        size_t avail = str_len;
+
+        if (avail < 3 ||
+                !utf8_trail(str[1]) || !utf8_trail(str[2])) {
+            if (avail < 2 || utf8_lead(str[1]))
+                return 1;
+            else if (avail < 3 || utf8_lead(str[2]))
+                return 2;
+            else
+                return 3;
+        }
+
+        return 3;
+    } else if (c < 0xf5) {
+        size_t avail = str_len;
+
+        if (avail < 4 ||
+                !utf8_trail(str[1]) || !utf8_trail(str[2]) ||
+                !utf8_trail(str[3])) {
+            if (avail < 2 || utf8_lead(str[1]))
+                return 1;
+            else if (avail < 3 || utf8_lead(str[2]))
+                return 2;
+            else if (avail < 4 || utf8_lead(str[3]))
+                return 3;
+            else
+                return 4;
+        }
+
+        return 4;
+    } else {
+        return 1;
+    }
+}
+
+static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len, bool substitute) {
+    const char *end = s + len;
+
+    char* output = simdjson_smart_str_alloc(buf, len + 2);
+    *output++ = '"';
+
+    while (s < end) {
+        simdutf::result res = simdutf::validate_utf8_with_errors(s, end - s);
+        if (res.error == simdutf::error_code::SUCCESS) {
+            break;
+        }
+        // Escape string that is considered valid
+        SIDMJSON_ZSTR_ALLOC(res.count * 6 + 4);
+        const char* last_char = s + res.count;
+        while (s < last_char) {
+            char c = *s++;
+            if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                *output++ = c;
+            } else {
+                output += simdjson_append_escape(output, c);
+            }
+        }
+        if (substitute) {
+            // Add replacement char
+            memcpy(output, "\xef\xbf\xbd", 3);
+            output += 3;
+        }
+        // Compute how much chars we need to skip
+        s += simdjson_get_next_char((unsigned char *)s, end - s);
+    }
+
+    SIDMJSON_ZSTR_ALLOC((end - s) * 6 + 4);
+    while (s < end) {
+        char c = *s++;
+        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+            *output++ = c;
+        } else {
+            output += simdjson_append_escape(output, c);
+        }
+    }
+
+    *output++ = '"';
+
+    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
+}
+
+static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder) {
+	size_t len = ZSTR_LEN(str);
+    const char *s = ZSTR_VAL(str);
+
+	if (len == 0) {
+		simdjson_smart_str_appendl(buf, "\"\"", 2);
+		return SUCCESS;
+	}
+
+	// Check if string is valid UTF-8 string
+	if (!ZSTR_IS_VALID_UTF8(str)) {
+	    if (EXPECTED(simdutf::validate_utf8(s, len))) {
+	        // Mark string as valid UTF-8
+        	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
+	    } else {
+            if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE || encoder->options & SIMDJSON_INVALID_UTF8_IGNORE) {
+                simdjson_escape_substitute_string(buf, s, len, encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE);
+                return SUCCESS;
+            }
+            encoder->error_code = SIMDJSON_ERROR_UTF8;
+            return FAILURE;
+		}
+    }
+
+#ifdef __SSE2__
+   if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
+     	simdjson_escape_long_string_avx2(buf, s, len);
+        return SUCCESS;
+   }
+#endif
+
+#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+    if (len >= sizeof(simdjson_vector8)) {
+    	simdjson_escape_long_string<simdjson_vector8>(buf, s, len);
+        return SUCCESS;
+    }
+#endif
+
+    simdjson_escape_short_string(buf, s, len);
+
+    return SUCCESS;
+}
+
 #define SIMDJSON_HASH_PROTECT_RECURSION(_tmp_ht) \
 	do { \
 		ZEND_ASSERT(_tmp_ht); \
@@ -472,271 +737,6 @@ static zend_result simdjson_encode_array_or_object(smart_str *buf, zval *val, si
 	}
 
 	return simdjson_encode_object(buf, val, encoder);
-}
-
-static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
-	auto append = simdjson_escape[c];
-	memcpy(buf, append.str, SIMDJSON_ENCODER_ESCAPE_LENGTH);
-	return append.len;
-}
-
-#define SIDMJSON_ZSTR_ALLOC(_size) \
-    do { \
-        auto _new_end = _size + output; \
-        if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
-            ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s); \
-            simdjson_smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
-            output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
-        } \
-    } while (0); \
-
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
-template<typename T>
-static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
-    T chunk;
-    const char* start = s;
-    const size_t vlen = len & (int) (~(sizeof(chunk) - 1)); // max length that can be processed in chunk mode
-    char *output;
-
-	output = simdjson_smart_str_alloc(buf, len + 2);
-    *output++ = '"';
-
-    // Iterate input string in chunks
-	while (s < start + vlen) {
-		// Load chars to vector
-		chunk.load((const uint8_t *) s);
-		// Check chunk if contains char that needs to be escaped
-        auto needs_escaping = chunk.needs_escaping();
-		if (EXPECTED(!needs_escaping)) {
-            // If no escape char found, store chunk in output buffer and move buffer pointer
-            ZEND_ASSERT(output + sizeof(chunk) <= ZSTR_VAL(buf->s) + buf->a);
-			chunk.store((uint8_t*)output);
-            output += sizeof(chunk);
-            s += sizeof(chunk);
-		} else {
-            // Allocate enough space for escaped chunk + space for rest of unescaped string
-            SIDMJSON_ZSTR_ALLOC((sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH) + (start + len - s));
-            // Copy first bytes that do not need escaping in chunk without checking
-            auto j = chunk.escape_index(needs_escaping);
-            memcpy(output, s, j);
-            output += j;
-            s += j;
-
-            // Process rest of chunk char by char and escape required char
-            for (; j < sizeof(chunk); j++) {
-                char c = *s++;
-                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-                    *output++ = c;
-                } else {
-                    output += simdjson_append_escape(output, c);
-                }
-            }
-        }
-	}
-
-    // Ensure that buf contains enough space that we can call unsafe methods
-    SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
-
-    // Finish last chars of string
-    while (s < start + len) {
-		char c = *s++;
-		if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-			*output++ = c;
-		} else {
-			output += simdjson_append_escape(output, c);
-		}
-	}
-    *output++ = '"';
-
-    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
-}
-#endif
-
-#ifdef __SSE2__
-static zend_always_inline bool simdjson_avx2_supported() {
-#ifdef __AVX2__
-    return true;
-#endif
-
-    return __builtin_cpu_supports("avx2"); // check support in runtime
-}
-
-TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
-	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
-}
-#endif
-
-static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
-    const char *end = s + len;
-
-    // For short strings allocate maximum possible string length, so we can write directly to output buffer
-    char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
-
-    *output++ = '"';
-    while (s < end) {
-        char c = *s++;
-        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-            *output++ = c;
-        } else {
-            output += simdjson_append_escape(output, c);
-        }
-    }
-    *output++ = '"';
-
-    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
-}
-
-/* valid as single byte character or leading byte */
-#define utf8_lead(c)  ((c) < 0x80 || ((c) >= 0xC2 && (c) <= 0xF4))
-/* whether it's actually valid depends on other stuff;
- * this macro cannot check for non-shortest forms, surrogates or
- * code points above 0x10FFFF */
-#define utf8_trail(c) ((c) >= 0x80 && (c) <= 0xBF)
-
-// Simplified version of php_next_utf8_char
-static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
-	if (str_len < 1)
-		return 1;
-
-    /* We'll follow strategy 2. from section 3.6.1 of UTR #36:
-     * "In a reported illegal byte sequence, do not include any
-     *  non-initial byte that encodes a valid character or is a leading
-     *  byte for a valid sequence." */
-    unsigned char c;
-    c = str[0];
-    if (c < 0x80 || c < 0xc2) {
-        return 1;
-    } else if (c < 0xe0) {
-        if (str_len < 2)
-            return 1;
-
-        if (!utf8_trail(str[1])) {
-            return utf8_lead(str[1]) ? 1 : 2;
-        }
-        return 2;
-    } else if (c < 0xf0) {
-        size_t avail = str_len;
-
-        if (avail < 3 ||
-                !utf8_trail(str[1]) || !utf8_trail(str[2])) {
-            if (avail < 2 || utf8_lead(str[1]))
-                return 1;
-            else if (avail < 3 || utf8_lead(str[2]))
-                return 2;
-            else
-                return 3;
-        }
-
-        return 3;
-    } else if (c < 0xf5) {
-        size_t avail = str_len;
-
-        if (avail < 4 ||
-                !utf8_trail(str[1]) || !utf8_trail(str[2]) ||
-                !utf8_trail(str[3])) {
-            if (avail < 2 || utf8_lead(str[1]))
-                return 1;
-            else if (avail < 3 || utf8_lead(str[2]))
-                return 2;
-            else if (avail < 4 || utf8_lead(str[3]))
-                return 3;
-            else
-                return 4;
-        }
-
-        return 4;
-    } else {
-        return 1;
-    }
-}
-
-static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len, bool substitute) {
-    const char *end = s + len;
-
-    char* output = simdjson_smart_str_alloc(buf, len + 2);
-    *output++ = '"';
-
-    while (s < end) {
-        simdutf::result res = simdutf::validate_utf8_with_errors(s, end - s);
-        if (res.error == simdutf::error_code::SUCCESS) {
-            break;
-        }
-        // Escape string that is considered valid
-        SIDMJSON_ZSTR_ALLOC(res.count * 6 + 4);
-        const char* last_char = s + res.count;
-        while (s < last_char) {
-            char c = *s++;
-            if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-                *output++ = c;
-            } else {
-                output += simdjson_append_escape(output, c);
-            }
-        }
-        if (substitute) {
-            // Add replacement char
-            memcpy(output, "\xef\xbf\xbd", 3);
-            output += 3;
-        }
-        // Compute how much chars we need to skip
-        s += simdjson_get_next_char((unsigned char *)s, end - s);
-    }
-
-    SIDMJSON_ZSTR_ALLOC((end - s) * 6 + 4);
-    while (s < end) {
-        char c = *s++;
-        if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-            *output++ = c;
-        } else {
-            output += simdjson_append_escape(output, c);
-        }
-    }
-
-    *output++ = '"';
-
-    ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
-}
-
-static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder) {
-	size_t len = ZSTR_LEN(str);
-    const char *s = ZSTR_VAL(str);
-
-	if (len == 0) {
-		simdjson_smart_str_appendl(buf, "\"\"", 2);
-		return SUCCESS;
-	}
-
-	// Check if string is valid UTF-8 string
-	if (!ZSTR_IS_VALID_UTF8(str)) {
-	    if (EXPECTED(simdutf::validate_utf8(s, len))) {
-	        // Mark string as valid UTF-8
-        	GC_ADD_FLAGS(str, IS_STR_VALID_UTF8);
-	    } else {
-            if (encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE || encoder->options & SIMDJSON_INVALID_UTF8_IGNORE) {
-                simdjson_escape_substitute_string(buf, s, len, encoder->options & SIMDJSON_INVALID_UTF8_SUBSTITUTE);
-                return SUCCESS;
-            }
-            encoder->error_code = SIMDJSON_ERROR_UTF8;
-            return FAILURE;
-		}
-    }
-
-#ifdef __SSE2__
-   if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
-     	simdjson_escape_long_string_avx2(buf, s, len);
-        return SUCCESS;
-   }
-#endif
-
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
-    if (len >= sizeof(simdjson_vector8)) {
-    	simdjson_escape_long_string<simdjson_vector8>(buf, s, len);
-        return SUCCESS;
-    }
-#endif
-
-    simdjson_escape_short_string(buf, s, len);
-
-    return SUCCESS;
 }
 
 static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
