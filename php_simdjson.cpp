@@ -101,6 +101,14 @@ static const char* simdjson_stream_mmap(php_stream *stream, size_t size, size_t 
         return NULL;
     }
     const char* p = php_stream_mmap_range(stream, stream->position, PHP_STREAM_MMAP_ALL, PHP_STREAM_MAP_MODE_SHARED_READONLY, mapped);
+    if (p == NULL) {
+        return NULL;
+    }
+
+#if defined(HAVE_MMAP) && defined(MADV_SEQUENTIAL) && defined(MADV_WILLNEED)
+    // Give advise to OS how we will use mmapped file
+    madvise((void*)p, *mapped, MADV_SEQUENTIAL | MADV_WILLNEED);
+#endif
 
     // Seek to end of mapped part of file
     if (php_stream_seek(stream, *mapped, SEEK_CUR) != 0) {
