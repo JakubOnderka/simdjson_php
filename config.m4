@@ -34,7 +34,6 @@ if test "$PHP_SIMDJSON" != "no"; then
   PHP_NEW_EXTENSION(simdjson, [
       php_simdjson.cpp                    \
       src/simdjson_decoder.cpp            \
-      src/countlut.cpp                    \
       src/simdjson_encoder.cpp            \
       src/simdutf.cpp                     \
       src/simdjson.cpp],

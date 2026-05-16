@@ -33,7 +33,7 @@ extern "C" {
 
 #include "php_simdjson.h"
 #include "simdjson_encoder.h"
-#include "countlut.h"
+#include "simdjson_integer_writer.h"
 #if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
 #include "simdjson_vector8.h"
 #endif
@@ -92,18 +92,17 @@ static inline void simdjson_append_double(smart_str *buf, double d) {
 }
 
 static inline void simdjson_append_long(smart_str *buf, zend_long number) {
-	char *output = simdjson_smart_str_alloc(buf, strlen("-9223372036854775807"));
-	unsigned chars = simdjson_i64toa_countlut(number, output);
-    ZSTR_LEN(buf->s) += chars;
+    char *output = simdjson_smart_str_alloc(buf, strlen("-9223372036854775807"));
+    char *end = simdjson_write_int_jeaiii(output, number);
+    ZSTR_LEN(buf->s) += end - output;
 }
 
 static inline void simdjson_append_number_index(smart_str *buf, zend_ulong index) {
     char *output = simdjson_smart_str_alloc(buf, strlen("18446744073709551615") + 2);
     *output++ = '"';
-    unsigned chars = simdjson_u64toa_countlut(index, output);
-    output += chars;
-    *output = '"';
-    ZSTR_LEN(buf->s) += chars + 2;
+    char *end = simdjson_write_uint_jeaiii(output, index);
+    *end = '"';
+    ZSTR_LEN(buf->s) += end - output + 2;
 }
 
 static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
