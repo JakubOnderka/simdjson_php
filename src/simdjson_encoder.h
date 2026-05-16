@@ -155,8 +155,6 @@ static const char simdjson_need_escaping[] = {
 
 zend_result simdjson_encode_zval(smart_str *buf, zval *val, simdjson_encoder *encoder);
 
-static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simdjson_encoder *encoder);
-
 zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encoder);
 
 const char* simdjson_encode_implementation();
