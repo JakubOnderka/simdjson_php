@@ -382,13 +382,8 @@ PHP_FUNCTION(simdjson_decode_from_input) {
             if (simdjson_simple_decode(ZSTR_VAL(membuf), ZSTR_LEN(membuf), return_value, associative)) {
                 return;
             }
-            if (SIMDJSON_SHOULD_REUSE_PARSER(ZSTR_LEN(membuf))) {
-                error = php_simdjson_parse(simdjson_get_reused_parser(), membuf, return_value, associative, depth);
-            } else {
-                simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
-                error = php_simdjson_parse(simdjson_php_parser, membuf, return_value, associative, depth);
-                php_simdjson_free_parser(simdjson_php_parser);
-            }
+            // always use reused parser, as PHP stores max 64 kB of body in memory
+            error = php_simdjson_parse(simdjson_get_reused_parser(), membuf, return_value, associative, depth);
             if (UNEXPECTED(error)) {
                 php_simdjson_throw_jsonexception(error);
                 RETURN_THROWS();
@@ -409,15 +404,16 @@ PHP_FUNCTION(simdjson_decode_from_input) {
         if (SG(request_info).content_length == 0) {
             php_simdjson_throw_jsonexception(simdjson::EMPTY);
             RETURN_THROWS();
-        } else if (SG(request_info).content_length < 0) {
+        }
+        if (SG(request_info).content_length < 0) {
             // I am not sure if content-length can be negative, so for now just throw exception
             zend_throw_exception(simdjson_decoder_exception_ce, "POST Content-Length is required", SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS);
             RETURN_THROWS();
-        } else if (SG(request_info).content_length > 0xFFFFFFFF) {
+        }
+        if (SG(request_info).content_length > 0xFFFFFFFF) {
             php_simdjson_throw_jsonexception(simdjson::CAPACITY);
             RETURN_THROWS();
         }
-
         if (simdjson_decode_from_input_check_max_size(SG(request_info).content_length)) {
             RETURN_THROWS();
         }
