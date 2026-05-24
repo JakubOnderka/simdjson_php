@@ -17,11 +17,11 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: "Build extension"
+      - name: "Build and test extension"
         run: "docker build -t simdjsontest -f docker-alpine --build-arg BASE_IMAGE=${{ matrix.php-version }} ."
 
-      - name: "Show"
-        run: "docker run --rm --env SIMDJSON_HIGH_MEMORY_TESTS=1 simdjsontest php --ri simdjson"
+      - name: "Show info"
+        run: "docker run --rm simdjsontest php --ri simdjson"
 
   Ubuntu-dev:
     strategy:

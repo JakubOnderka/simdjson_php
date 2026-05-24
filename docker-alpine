@@ -1,23 +1,20 @@
 ARG BASE_IMAGE=8.0-cli-alpine3.16
 FROM php:$BASE_IMAGE
 
+RUN apk add --no-cache --virtual .build-deps autoconf \
+     g++ \
+     gcc \
+     make \
+     pkgconf \
+     git \
+     re2c
+
 COPY . /tmp/simdjson
 
-# persistent / runtime deps
-ENV PHPIZE_DEPS \
-    autoconf \
-    g++ \
-    gcc \
-    make \
-    pkgconf \
-    git \
-    re2c
-
 ENV REPORT_EXIT_STATUS=1
+ENV NO_INTERACTION=1
 
 RUN set -xe \
-    && apk add --no-cache --virtual .build-deps \
-        $PHPIZE_DEPS \
     && cd /tmp/simdjson \
     && phpize  \
     && ./configure  \
