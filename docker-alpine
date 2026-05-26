@@ -20,6 +20,6 @@ RUN set -xe \
     && ./configure  \
     && make -j$(nproc)  \
     && make install \
-    && make test \
+    && make test TESTS="--show-diff -j$(nproc)" \
     && rm -rf /tmp/simdjson \
     && echo "extension=simdjson.so" > /usr/local/etc/php/conf.d/simdjson.ini
