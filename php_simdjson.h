@@ -66,13 +66,18 @@ extern zend_module_entry simdjson_module_entry;
 /**
  * Number of strings in array of array or object keys that will be deduplicated
  */
-#define SIMDJSON_DEDUP_STRING_COUNT       256
+#define SIMDJSON_DEDUP_STRING_COUNT           256
 /**
  * Maximum length of strings to be considered for deduplication.
  * Longer strings are less likely to be duplicated and the memory overhead
  * of storing them in the hash table might exceed the benefits.
  */
 #define SIMDJSON_MAX_DEDUP_LENGTH             64
+/**
+ * Maximum block size that will be read from SAPI in case of
+ * application/json type or when using simdjson_decode_from_input()
+ */
+#define SIMDJSON_SAPI_POST_BLOCK_SIZE         (SAPI_POST_BLOCK_SIZE * 4)
 
 /**
 * Configure simdjson library

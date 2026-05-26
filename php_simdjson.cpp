@@ -382,7 +382,7 @@ PHP_FUNCTION(simdjson_decode_from_input) {
             if (simdjson_simple_decode(ZSTR_VAL(membuf), ZSTR_LEN(membuf), return_value, associative)) {
                 return;
             }
-            // always use reused parser, as PHP stores max 64 kB of body in memory
+            // always use reused parser, as PHP stores max 64 kB (see SIMDJSON_SAPI_POST_BLOCK_SIZE) of body in memory
             error = php_simdjson_parse(simdjson_get_reused_parser(), membuf, return_value, associative, depth);
             if (UNEXPECTED(error)) {
                 php_simdjson_throw_jsonexception(error);
@@ -418,7 +418,7 @@ PHP_FUNCTION(simdjson_decode_from_input) {
             RETURN_THROWS();
         }
 
-        body = php_stream_temp_create_ex(TEMP_STREAM_DEFAULT, SAPI_POST_BLOCK_SIZE * 4, PG(upload_tmp_dir));
+        body = php_stream_temp_create_ex(TEMP_STREAM_DEFAULT, SIMDJSON_SAPI_POST_BLOCK_SIZE, PG(upload_tmp_dir));
         SG(request_info).request_body = body;
 
         // allocate buffer for whole request with padding
@@ -1040,6 +1040,31 @@ PHP_GINIT_FUNCTION (simdjson) {
     GC_ADD_FLAGS(_dest, IS_STR_VALID_UTF8); \
 } while(0); \
 
+#if PHP_VERSION_ID >= 80400
+// For application/json content-type do not read request content to SG(request_info).request_body
+// simdjson_decode_from_input can handle reading from SAPI more efficiently
+// if simdjson_decode_from_input is not used, body will be read by in case it is really necessary
+static SAPI_POST_READER_FUNC(simdjson_post_reader) {
+    zend_long post_max_size = REQUEST_PARSE_BODY_OPTION_GET(post_max_size, SG(post_max_size));
+
+    if (post_max_size > 0 && SG(request_info).content_length > post_max_size) {
+        php_error_docref(NULL, E_WARNING, "POST Content-Length of " ZEND_LONG_FMT " bytes exceeds the limit of " ZEND_LONG_FMT " bytes",
+                    SG(request_info).content_length, post_max_size);
+    }
+}
+
+static SAPI_POST_HANDLER_FUNC(simdjson_post_handler) {
+    // intentionally empty
+}
+
+static sapi_post_entry simdjson_post_entry = {
+    "application/json",
+    sizeof("application/json") - 1,
+    simdjson_post_reader,
+    simdjson_post_handler
+};
+#endif
+
 /** {{{ PHP_MINIT_FUNCTION
 */
 PHP_MINIT_FUNCTION (simdjson) {
@@ -1056,6 +1081,12 @@ PHP_MINIT_FUNCTION (simdjson) {
 
     register_simdjson_symbols(0);
 
+#if PHP_VERSION_ID >= 80400
+    if (sapi_register_post_entry(&simdjson_post_entry) == FAILURE) {
+        return FAILURE;
+    }
+#endif
+
     return SUCCESS;
 }
 /* }}} */
@@ -1063,6 +1094,9 @@ PHP_MINIT_FUNCTION (simdjson) {
 /** {{{ PHP_MSHUTDOWN_FUNCTION
 */
 PHP_MSHUTDOWN_FUNCTION (simdjson) {
+#if PHP_VERSION_ID >= 80400
+    sapi_unregister_post_entry(&simdjson_post_entry);
+#endif
     return SUCCESS;
 }
 /* }}} */
