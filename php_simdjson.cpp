@@ -37,6 +37,7 @@ PHP_SIMDJSON_API zend_class_entry *simdjson_base64_encode_ce;
 
 /* C++ header file for simdjson_php helper methods/classes */
 #include "src/simdjson_compatibility.h"
+#include "src/simdjson_integer_writer.h"
 #include "src/simdjson_smart_str.h"
 #include "src/simdjson_decoder_defs.h"
 #include "src/simdjson_encoder.h"
@@ -707,7 +708,15 @@ static zend_always_inline bool simdjson_validate_encode_depth(const zend_long de
 }
 
 #if PHP_VERSION_ID >= 80200
-/** For simple types we can just return direct interned string without allocating new strings */
+static zend_string* simdjson_encode_long(zend_long value) {
+    zend_string* str = zend_string_alloc(strlen("-9223372036854775807"), 0);
+    char *end = simdjson_write_int_jeaiii(ZSTR_VAL(str), value);
+    ZSTR_LEN(str) = end - ZSTR_VAL(str);
+    ZSTR_VAL(str)[ZSTR_LEN(str)] = '\0';
+    return str;
+}
+
+/** For simple types we can just return direct interned string without allocating new strings or for integers we can write to fixed size buffer */
 static zend_always_inline bool simdjson_encode_simple(const zval *parameter, zval *return_value) {
     switch (Z_TYPE_P(parameter)) {
         case IS_NULL:
@@ -727,7 +736,8 @@ static zend_always_inline bool simdjson_encode_simple(const zval *parameter, zva
                 RETVAL_INTERNED_STR(ZSTR_CHAR((unsigned char) '0' + Z_LVAL_P(parameter)));
                 return true;
             }
-            break;
+            RETVAL_NEW_STR(simdjson_encode_long(Z_LVAL_P(parameter)));
+            return true;
 
         case IS_ARRAY:
             if (zend_hash_num_elements(Z_ARRVAL_P(parameter)) == 0) {
