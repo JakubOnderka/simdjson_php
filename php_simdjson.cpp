@@ -436,6 +436,11 @@ PHP_FUNCTION(simdjson_decode_from_input) {
             RETURN_THROWS();
         }
 
+#ifdef ZEND_DEBUG
+        // Set padding to zero to make valgrind happy
+        memset(json + len, 0, simdjson::SIMDJSON_PADDING);
+#endif
+
         // write whole input buffer also to request_body, so it can be read later
         if (php_stream_write(body, json, len) != len) {
             php_stream_truncate_set_size(body, 0);
