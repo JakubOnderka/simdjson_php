@@ -14,8 +14,10 @@ RUN curl -L https://www.php.net/distributions/php-$PHP_VERSION.tar.xz | tar xJf 
 
 COPY . /tmp/simdjson
 
-RUN cd /tmp/simdjson && \
-    phpize && \
+WORKDIR /tmp/simdjson
+RUN phpize && \
     ./configure && \
-    make -j$(nproc) && \
-    make test TESTS="-m --show-diff -j$(nproc)"
+    make -j$(nproc)
+
+ENV NO_INTERACTION=true
+RUN make test TESTS="-m --show-diff -j$(nproc)"
