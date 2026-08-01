@@ -118,15 +118,14 @@ static const char* simdjson_stream_mmap(php_stream *stream, size_t size, size_t 
     return p;
 }
 
-// Simplified version of _php_stream_copy_to_mem that allways allocated string with required padding and returns
-// char* instead of of zend_string* to avoid unnecessary overhead
+// Simplified version of _php_stream_copy_to_mem that always allocate string with required padding (when with_padding)
+// and returns char* instead of of zend_string* to avoid unnecessary overhead
 template <bool with_padding> static char *simdjson_stream_copy_to_mem(php_stream *src, size_t size, size_t *len) {
     ssize_t ret = 0;
     char *ptr;
     size_t buflen;
-    int step = 8192;
-    int min_room = 8192 / 4;
     char* result;
+    const int CHUNK_SIZE = 8192;
 
     /* disabling the read buffer allows doing the whole transfer
        in just one read() system call */
@@ -138,21 +137,22 @@ template <bool with_padding> static char *simdjson_stream_copy_to_mem(php_stream
      * we can.  Note that the stream may be filtered, in which case the stat
      * result may be inaccurate, as the filter may inflate or deflate the
      * number of bytes that we can read.  In order to avoid an upsize followed
-     * by a downsize of the buffer, overestimate by the step size (which is
+     * by a downsize of the buffer, overestimate by the CHUNK_SIZE size (which is
      * 8K).  */
     if (size > 0) {
-        buflen = ZEND_MM_ALIGNED_SIZE(MAX(size - src->position, 0)) + step;
+        buflen = ZEND_MM_ALIGNED_SIZE(MAX(size - src->position, 0)) + CHUNK_SIZE;
     } else {
-        buflen = step;
+        buflen = CHUNK_SIZE;
     }
 
     result = (char*) emalloc(buflen);
     ptr = result;
 
+    const int min_room = CHUNK_SIZE / 4;
     while ((ret = php_stream_read(src, ptr, buflen - *len)) > 0) {
         *len += ret;
         if (*len + min_room >= buflen) {
-            buflen += step;
+            buflen += CHUNK_SIZE;
             result = (char*) erealloc(result, buflen);
             ptr = result + *len;
         } else {
