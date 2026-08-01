@@ -1076,9 +1076,11 @@ static SAPI_POST_HANDLER_FUNC(simdjson_post_handler) {
     // intentionally empty
 }
 
+static char json_content_type[] = "application/json";
+
 static sapi_post_entry simdjson_post_entry = {
-    "application/json",
-    sizeof("application/json") - 1,
+    json_content_type,
+    sizeof(json_content_type) - 1,
     simdjson_post_reader,
     simdjson_post_handler
 };
