@@ -621,16 +621,21 @@ flf_clean:
 #endif
 
 static void simdjson_utf8_len(zend_string* string, zval* return_value) {
-    bool is_valid = ZSTR_IS_VALID_UTF8(string) || simdutf::validate_utf8(ZSTR_VAL(string), ZSTR_LEN(string));
-    if (EXPECTED(is_valid)) {
-        // String is UTF-8 valid, so we can also set proper flag
-        GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
-        // Compute number of chars
-        ZVAL_LONG(return_value, simdutf::count_utf8(ZSTR_VAL(string), ZSTR_LEN(string)));
-    } else {
-        // Return false in case string is not UTF-8 valid
-        ZVAL_BOOL(return_value, false);
+    // String is already marked as UTF-8 valid, so we can just count characters without validating
+    if (EXPECTED(ZSTR_IS_VALID_UTF8(string))) {
+        RETURN_LONG(simdutf::count_utf8(ZSTR_VAL(string), ZSTR_LEN(string)));
     }
+
+    // Check if string is valid UTF-8 and count characters at the same time
+    auto result = simdutf::validate_utf8_with_errors(ZSTR_VAL(string), ZSTR_LEN(string));
+    if (result.is_err()) {
+        RETURN_BOOL(false);
+    }
+
+    // String is UTF-8 valid, so we can also set proper flag
+    GC_ADD_FLAGS(string, IS_STR_VALID_UTF8);
+
+    RETURN_LONG(result.count);
 }
 
 PHP_FUNCTION(simdjson_utf8_len) {
