@@ -207,25 +207,29 @@ PHP_FUNCTION(simdjson_validate) {
 
 // Decode simple and common JSON values without allocating and using simdjson parser
 static zend_always_inline bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative) {
-    // Empty object
-    if (len == 2 && json[0] == '{' && json[1] == '}') {
-        if (associative) {
+    if (len == 2) {
+        // Empty object
+        if (json[0] == '{' && json[1] == '}') {
+            if (associative) {
+                RETVAL_EMPTY_ARRAY();
+            } else {
+                object_init(return_value);
+            }
+            return true;
+
+        // Empty array
+        } else if (json[0] == '[' && json[1] == ']') {
             RETVAL_EMPTY_ARRAY();
-        } else {
-            object_init(return_value);
+            return true;
         }
-        return true;
-    }
-
-    // Empty array
-    if (len == 2 && json[0] == '[' && json[1] == ']') {
-        RETVAL_EMPTY_ARRAY();
-        return true;
-    }
-
-    if (len == 4 && memcmp(json, "true", 4) == 0) {
-        RETVAL_TRUE;
-        return true;
+    } else if (len == 4) {
+        if (memcmp(json, "true", 4) == 0) {
+            RETVAL_TRUE;
+            return true;
+        } else if (memcmp(json, "null", 4) == 0) {
+            RETVAL_NULL();
+            return true;
+        }
     } else if (len == 5 && memcmp(json, "false", 5) == 0) {
         RETVAL_FALSE;
         return true;
