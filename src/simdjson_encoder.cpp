@@ -81,7 +81,7 @@ static inline void simdjson_pretty_print_nl_ident(smart_str *buf, const simdjson
 }
 
 static inline void simdjson_append_double(smart_str *buf, double d) {
-    char *output = simdjson_smart_str_alloc(buf, 21);
+    char *output = simdjson_smart_str_alloc(buf, 24);
     char *end = simdjson::internal::to_chars(output, nullptr, d);
     // HACK: simdjson to_chars method always add .0 at end of string. If output string contains '.0' at the end,
     // remove it to use the same behaviour as PHP php_gcvt
