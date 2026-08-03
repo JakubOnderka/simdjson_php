@@ -71,7 +71,7 @@ get_key_with_optional_prefix_ondemand(simdjson::ondemand::document &doc, std::st
     return doc.at_pointer(std_pointer);
 }
 
-// Initialize stdClass object and return pointer to propertires HashTable
+// Initialize stdClass object and return pointer to properties HashTable
 static zend_always_inline HashTable* simdjson_init_object(zval *zv, uint32_t size) {
 #if PHP_VERSION_ID >= 80300
     ZEND_ASSERT(zend_standard_class_def->default_properties_count == 0);
@@ -653,6 +653,38 @@ static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::va
         EMPTY_SWITCH_DEFAULT_CASE();
     }
     return simdjson::SUCCESS;
+}
+
+// Decode simple and common JSON values without allocating and using simdjson parser
+bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative) {
+    if (len == 2) {
+        // Empty object
+        if (json[0] == '{' && json[1] == '}') {
+            if (associative) {
+                RETVAL_EMPTY_ARRAY();
+            } else {
+                simdjson_init_object(return_value, 0);
+            }
+            return true;
+
+        // Empty array
+        } else if (json[0] == '[' && json[1] == ']') {
+            RETVAL_EMPTY_ARRAY();
+            return true;
+        }
+    } else if (len == 4) {
+        if (memcmp(json, "true", 4) == 0) {
+            RETVAL_TRUE;
+            return true;
+        } else if (memcmp(json, "null", 4) == 0) {
+            RETVAL_NULL();
+            return true;
+        }
+    } else if (len == 5 && memcmp(json, "false", 5) == 0) {
+        RETVAL_FALSE;
+        return true;
+    }
+    return false;
 }
 
 PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_parser* parser, const zend_string *json, size_t depth) {

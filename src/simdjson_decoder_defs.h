@@ -16,6 +16,8 @@
 #include "php.h"
 #include "simdjson.h"
 
+bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative);
+
 // NOTE: Namespaces are C++ only functionality.
 // To expose this functionality to other C PECLs,
 // bindings.h exposes a forward class declaration of a class that only wraps simdjson::dom::parser
