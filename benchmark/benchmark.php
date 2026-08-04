@@ -1,18 +1,4 @@
 <?php
-/**
- * Created by PhpStorm.
- * User: wangjinxi
- * Date: 2019/4/16
- * Time: 3:32 AM
- */
-
-if (!function_exists('hrtime')) {
-    function hrtime(bool $as_number = false)
-    {
-        return microtime($as_number);
-    }
-}
-
 // Repeat the operation to make benchmark results less random.
 const ITERATIONS = 4;
 
