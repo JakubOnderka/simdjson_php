@@ -36,8 +36,30 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: "Build PHP and extension in development mode"
-        run: "docker build -f docker-dev --build-arg PHP_VERSION=${{ matrix.php-version }} ."
+      - name: Install required packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gcc xz-utils libxml2-dev pkg-config make autoconf g++ valgrind
+
+      - name: Build PHP
+        run: |
+          mkdir /tmp/php
+          cd /tmp/php
+          curl -L https://www.php.net/distributions/php-${{ matrix.php-version }}.tar.xz | tar --strip-components=1 -xJf -
+          ./configure --enable-debug --without-sqlite3 --disable-pdo --disable-dom --disable-simplexml --disable-phar --without-pdo-sqlite
+          make -j$(nproc)
+          sudo make install
+
+      - name: Build extension
+        run: |
+          phpize
+          ./configure
+          make -j$(nproc)
+
+      - name: Run tests
+        env:
+          NO_INTERACTION: "true"
+        run: make test TESTS="-m --show-diff -j$(nproc)"
 
   Ubuntu:
     strategy:
@@ -70,16 +92,16 @@ jobs:
           tools: pecl, phpize, php-config
 
       - name: Build extension
+        env:
+          NO_INTERACTION: "true"
+          SIMDJSON_HIGH_MEMORY_TESTS: "1"
         run: |
-          export NO_INTERACTION=true
-          export REPORT_EXIT_STATUS=1
-          export SIMDJSON_HIGH_MEMORY_TESTS=1
           php-config --extension-dir
           phpize
           ./configure
           make -j$(nproc)
           sudo make install
-          make test TESTS="--show-diff -j2 -q" || exit 1
+          make test TESTS="--show-diff -j2 -q"
 
       - name: Show
         run: "php -dextension=simdjson.so --ri simdjson"
