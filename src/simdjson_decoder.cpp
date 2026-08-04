@@ -145,21 +145,25 @@ static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_
 }
 
 // Check if it is necessary to reallocate string to buffer
-static zend_always_inline bool simdjson_realloc_needed(const zend_string *json) {
+static zend_always_inline bool simdjson_realloc_needed(const zend_string *str) {
     // it is not possible to check allocated size for persistent or permanent string
-    bool is_persistent_or_permanent = GC_FLAGS(json) & (IS_STR_PERSISTENT | IS_STR_PERMANENT);
+    bool is_persistent_or_permanent = GC_FLAGS(str) & (IS_STR_PERSISTENT | IS_STR_PERMANENT);
     if (UNEXPECTED(is_persistent_or_permanent)) {
         return true;
     }
 
-    size_t allocated = zend_mem_block_size((void*)json);
-    if (UNEXPECTED(allocated == 0)) {
+    if (UNEXPECTED(!is_zend_mm())) {
         return true;
     }
-    size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(json));
-    size_t free_space = allocated - struct_size;
 
-    return free_space < simdjson::SIMDJSON_PADDING;
+    size_t struct_addr = (size_t)str;
+    // Get whole struct size with headers
+    size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(str));
+    // Get start position of chunk that stores zend_string
+    size_t chunk_start = struct_addr & ~(ZEND_MM_CHUNK_SIZE - 1);
+    size_t string_end = struct_addr + struct_size;
+    // Check if chunk has still space for padding after string end
+    return string_end + simdjson::SIMDJSON_PADDING > chunk_start + (struct_size / ZEND_MM_CHUNK_SIZE + 1) * ZEND_MM_CHUNK_SIZE;
 }
 
 static simdjson::padded_string_view simdjson_padded_string_view(const zend_string *json, simdjson::padded_string &jsonbuffer) {
