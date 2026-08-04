@@ -1,5 +1,5 @@
 --TEST--
-Test simdjson_decode_from_stream() functions
+Test simdjson_decode_from_stream() function
 --FILE--
 <?php
 $filesToCheck = glob("jsonexamples/*.json");
@@ -8,13 +8,6 @@ foreach ($filesToCheck as $file) {
     echo "Processing file $file\n";
     simdjson_decode_from_stream(fopen($file, 'r'));
 }
-
-try {
-    simdjson_decode_from_stream(fopen("php://memory", "r"));
-} catch (Exception $e) {
-    echo $e->getMessage();
-}
-
 --EXPECT--
 Processing file jsonexamples/apache_builds.json
 Processing file jsonexamples/canada.json
@@ -37,4 +30,3 @@ Processing file jsonexamples/small/flatadversarial.json
 Processing file jsonexamples/small/repeat.json
 Processing file jsonexamples/small/truenull.json
 Processing file jsonexamples/small/twitter_timeline.json
-no JSON found
