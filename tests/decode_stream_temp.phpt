@@ -40,6 +40,20 @@ $temp = fopen("php://temp", "w+");
 fwrite($temp, "\"" . str_repeat("a", 1024 * 1024 * 2) . "\"");
 fseek($temp, 0);
 var_dump(strlen(simdjson_decode_from_stream($temp)));
+
+// Decode temp stream that is saved in file with filter
+$temp = fopen("php://temp", "w+");
+fwrite($temp, "\"" . str_repeat("a", 1024 * 1024 * 2) . "\"");
+fseek($temp, 0);
+stream_filter_append($temp, 'string.tolower');
+var_dump(strlen(simdjson_decode_from_stream($temp)));
+
+// Use filter
+$temp = fopen("php://temp", "w+");
+fwrite($temp, "TRUE");
+fseek($temp, 0);
+stream_filter_append($temp, 'string.tolower');
+var_dump(simdjson_decode_from_stream($temp));
 --EXPECT--
 no JSON found
 no JSON found
@@ -47,3 +61,5 @@ The JSON document has an improper structure: missing or superfluous commas, brac
 bool(true)
 int(4)
 int(2097152)
+int(2097152)
+bool(true)
