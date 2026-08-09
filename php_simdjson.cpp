@@ -241,6 +241,24 @@ PHP_FUNCTION(simdjson_decode) {
     }
 }
 
+#if PHP_VERSION_ID >= 80200
+// In case whole data of temp stream is in memory, we can just read stream buffer without allocating new buffer
+static zend_string* simdjson_temp_stream_memory_buffer(php_stream *stream) {
+    struct simdjson_php_stream_temp_data {
+        php_stream *innerstream;
+    };
+
+    ZEND_ASSERT(php_stream_is(stream, PHP_STREAM_IS_TEMP));
+    simdjson_php_stream_temp_data *ts = (simdjson_php_stream_temp_data*)stream->abstract;
+    ZEND_ASSERT(ts != NULL);
+    ZEND_ASSERT(ts->innerstream != NULL);
+    if (php_stream_is(ts->innerstream, PHP_STREAM_IS_MEMORY)) {
+        return php_stream_memory_get_buffer(ts->innerstream);
+    }
+    return NULL;
+}
+#endif
+
 PHP_FUNCTION(simdjson_decode_from_stream) {
     zend_bool associative = 0;
     zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
@@ -261,6 +279,53 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
 
     simdjson_php_error_code error;
 
+#if PHP_VERSION_ID >= 80200
+    // For unfiltered memory and temp streams, parse data directly from buffer without allocating new space and copying to
+    // new buffer
+    if ((php_stream_is(stream, PHP_STREAM_IS_TEMP) || php_stream_is(stream, PHP_STREAM_IS_MEMORY)) && !php_stream_is_filtered(stream)) {
+        zend_string* buffer;
+        if (php_stream_is(stream, PHP_STREAM_IS_TEMP)) {
+            buffer = simdjson_temp_stream_memory_buffer(stream);
+            if (buffer == NULL) {
+                // temp buffer is not
+                goto standard_decoding;
+            }
+        } else {
+            buffer = php_stream_memory_get_buffer(stream);
+        }
+
+        if (UNEXPECTED(simdjson_realloc_needed(buffer))) {
+            goto standard_decoding; // skip fast path in case we need to reallocate string
+        }
+
+        size_t buffer_pos = MIN(stream->position, ZSTR_LEN(buffer));
+        json = ZSTR_VAL(buffer) + buffer_pos;
+        len = ZSTR_LEN(buffer) - buffer_pos;
+
+        // Seek to end of stream
+        php_stream_seek(stream, len, SEEK_CUR);
+
+        if (simdjson_simple_decode(json, len, return_value, associative)) {
+            return;
+        }
+
+        if (SIMDJSON_SHOULD_REUSE_PARSER(len)) {
+            error = php_simdjson_parse_buffer(simdjson_get_reused_parser(), json, len, return_value, associative, depth);
+        } else {
+            simdjson_php_parser *simdjson_php_parser = php_simdjson_create_parser();
+            error = php_simdjson_parse_buffer(simdjson_php_parser, json, len, return_value, associative, depth);
+            php_simdjson_free_parser(simdjson_php_parser);
+        }
+
+        if (UNEXPECTED(error)) {
+            php_simdjson_throw_jsonexception(error);
+            RETURN_THROWS();
+        }
+        return;
+    }
+#endif
+
+standard_decoding:
     php_stream_statbuf ssbuf;
     php_stream_stat(stream, &ssbuf);
 
@@ -341,17 +406,8 @@ PHP_FUNCTION(simdjson_decode_from_input) {
         }
 
 #if PHP_VERSION_ID >= 80200
-        struct simdjson_php_stream_temp_data {
-        	php_stream *innerstream;
-        };
-
-        ZEND_ASSERT(php_stream_is(body, PHP_STREAM_IS_TEMP));
-        simdjson_php_stream_temp_data *ts = (simdjson_php_stream_temp_data*)body->abstract;
-        ZEND_ASSERT(ts != NULL);
-        ZEND_ASSERT(ts->innerstream != NULL);
-        if (php_stream_is(ts->innerstream, PHP_STREAM_IS_MEMORY)) {
-            // whole body is in memory, so we can just read stream buffer without allocating new buffer
-            zend_string *membuf = php_stream_memory_get_buffer(ts->innerstream);
+        zend_string *membuf = simdjson_temp_stream_memory_buffer(body);
+        if (membuf) {
             if (simdjson_simple_decode(ZSTR_VAL(membuf), ZSTR_LEN(membuf), return_value, associative)) {
                 return;
             }
