@@ -16,6 +16,7 @@
 #include "php.h"
 #include "simdjson.h"
 
+bool simdjson_realloc_needed(const zend_string *str);
 bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative);
 
 // NOTE: Namespaces are C++ only functionality.

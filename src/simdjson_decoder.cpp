@@ -145,7 +145,7 @@ static zend_always_inline HashTable* simdjson_init_mixed_array(zval *zv, uint32_
 }
 
 // Check if it is necessary to reallocate string to buffer
-static zend_always_inline bool simdjson_realloc_needed(const zend_string *str) {
+bool simdjson_realloc_needed(const zend_string *str) {
     // it is not possible to check allocated size for persistent or permanent string
     bool is_persistent_or_permanent = GC_FLAGS(str) & (IS_STR_PERSISTENT | IS_STR_PERMANENT);
     if (UNEXPECTED(is_persistent_or_permanent)) {
@@ -167,7 +167,7 @@ static zend_always_inline bool simdjson_realloc_needed(const zend_string *str) {
 }
 
 static simdjson::padded_string_view simdjson_padded_string_view(const zend_string *json, simdjson::padded_string &jsonbuffer) {
-    if (simdjson_realloc_needed(json)) {
+    if (UNEXPECTED(simdjson_realloc_needed(json))) {
         jsonbuffer = simdjson::padded_string(ZSTR_VAL(json), ZSTR_LEN(json));
         return jsonbuffer;
     } else {
