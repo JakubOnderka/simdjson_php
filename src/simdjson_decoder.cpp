@@ -157,8 +157,8 @@ bool simdjson_realloc_needed(const zend_string *str) {
     }
 
     size_t struct_addr = (size_t)str;
-    // Get whole struct size with headers
-    size_t struct_size = _ZSTR_STRUCT_SIZE(ZSTR_LEN(str));
+    // Get whole struct size with headers (we can consider null string termination as part of padding)
+    size_t struct_size = _ZSTR_HEADER_SIZE + ZSTR_LEN(str);
     // Get start position of chunk that stores zend_string
     size_t chunk_start = struct_addr & ~(ZEND_MM_CHUNK_SIZE - 1);
     size_t string_end = struct_addr + struct_size;
