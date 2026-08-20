@@ -768,6 +768,11 @@ static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *va
         zend_object             std;
     };
 
+    if (UNEXPECTED(simdjson_check_stack_limit())) {
+        encoder->error_code = SIMDJSON_ERROR_DEPTH;
+        return FAILURE;
+    }
+
     zend_object *obj = Z_OBJ_P(val);
     simdjson_spl_fixedarray_object *intern = (simdjson_spl_fixedarray_object *)((char *)obj - XtOffsetOf(simdjson_spl_fixedarray_object, std));
 
