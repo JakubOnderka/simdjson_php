@@ -390,7 +390,7 @@ static zend_result simdjson_encode_packed_array(smart_str *buf, HashTable *table
 
     ZEND_ASSERT(recursion_rc != NULL);
 
-	if (GC_IS_RECURSIVE(recursion_rc)) {
+	if (UNEXPECTED(GC_IS_RECURSIVE(recursion_rc))) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -433,7 +433,7 @@ static zend_result simdjson_encode_mixed_array(smart_str *buf, HashTable *table,
 
     ZEND_ASSERT(recursion_rc != NULL);
 
-	if (GC_IS_RECURSIVE(recursion_rc)) {
+	if (UNEXPECTED(GC_IS_RECURSIVE(recursion_rc))) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -501,7 +501,7 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simd
 	zend_property_info *prop_info;
 	zval *prop;
 
-	if (GC_IS_RECURSIVE(obj)) {
+	if (UNEXPECTED(GC_IS_RECURSIVE(obj))) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -580,7 +580,7 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
     recursion_rc = (zend_refcounted *)myht;
 #endif
 
-    if (GC_IS_RECURSIVE(recursion_rc)) {
+    if (UNEXPECTED(GC_IS_RECURSIVE(recursion_rc))) {
         encoder->error_code = SIMDJSON_ERROR_RECURSION;
         zend_release_properties(myht);
         return FAILURE;
@@ -779,7 +779,7 @@ static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *va
 
     ZEND_ASSERT(intern->array.size > 0);
 
-    if (GC_IS_RECURSIVE(obj)) {
+    if (UNEXPECTED(GC_IS_RECURSIVE(obj))) {
         encoder->error_code = SIMDJSON_ERROR_RECURSION;
         return FAILURE;
     }
@@ -826,7 +826,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	uint32_t *guard = zend_get_recursion_guard(obj);
 	ZEND_ASSERT(guard != NULL);
 
-	if (ZEND_GUARD_IS_RECURSIVE(guard, JSON)) {
+	if (UNEXPECTED(ZEND_GUARD_IS_RECURSIVE(guard, JSON))) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
@@ -835,7 +835,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 #else
 	HashTable* myht = Z_OBJPROP_P(val);
 
-	if (GC_IS_RECURSIVE(myht)) {
+	if (UNEXPECTED(GC_IS_RECURSIVE(myht))) {
 		encoder->error_code = SIMDJSON_ERROR_RECURSION;
 		return FAILURE;
 	}
