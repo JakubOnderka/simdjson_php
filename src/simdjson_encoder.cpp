@@ -755,7 +755,7 @@ static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
 }
 
 #if PHP_VERSION_ID >= 80300
-static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *obj, simdjson_encoder *encoder) {
+static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *val, simdjson_encoder *encoder) {
     struct simdjson_spl_fixedarray {
         zend_long size;
         zval *elements;
@@ -768,7 +768,8 @@ static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *ob
         zend_object             std;
     };
 
-    simdjson_spl_fixedarray_object *intern = (simdjson_spl_fixedarray_object *)((char *)Z_OBJ_P(obj) - XtOffsetOf(simdjson_spl_fixedarray_object, std));
+    zend_object *obj = Z_OBJ_P(val);
+    simdjson_spl_fixedarray_object *intern = (simdjson_spl_fixedarray_object *)((char *)obj - XtOffsetOf(simdjson_spl_fixedarray_object, std));
 
     if (intern->array.elements == NULL) {
         ZEND_ASSERT(intern->array.size == 0);
@@ -778,6 +779,13 @@ static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *ob
 
     ZEND_ASSERT(intern->array.size > 0);
 
+    if (GC_IS_RECURSIVE(obj)) {
+        encoder->error_code = SIMDJSON_ERROR_RECURSION;
+        return FAILURE;
+    }
+
+    SIMDJSON_HASH_PROTECT_RECURSION(obj);
+
     simdjson_smart_str_appendc(buf, '[');
     ++encoder->depth;
 
@@ -785,10 +793,13 @@ static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *ob
         simdjson_pretty_print_nl_ident(buf, encoder);
         zval *current = &intern->array.elements[i];
         if (UNEXPECTED(simdjson_encode_zval(buf, current, encoder) == FAILURE)) {
+            SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
             return FAILURE;
         }
         simdjson_smart_str_appendc(buf, ',');
     }
+
+    SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
 
     ZSTR_LEN(buf->s)--; // remove last comma
 
