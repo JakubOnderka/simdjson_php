@@ -25,6 +25,7 @@ extern "C" {
 #include "zend_portability.h"
 #include <zend_exceptions.h>
 #include "ext/json/php_json.h" /* For php_json_serializable_ce */
+#include "ext/spl/spl_fixedarray.h" /* For spl_ce_SplFixedArray */
 #if PHP_VERSION_ID >= 80400
 #include "zend_property_hooks.h"
 #include "zend_lazy_objects.h"
@@ -753,6 +754,57 @@ static void simdjson_encode_base64_object(smart_str *buf, const zval *val) {
     *output = '"';
 }
 
+#if PHP_VERSION_ID >= 80300
+static zend_result simdjson_encode_spl_fixedarray(smart_str *buf, const zval *obj, simdjson_encoder *encoder) {
+    struct simdjson_spl_fixedarray {
+        zend_long size;
+        zval *elements;
+        zend_long cached_resize;
+    };
+
+    struct simdjson_spl_fixedarray_object {
+        simdjson_spl_fixedarray array;
+        zend_function          *fptr_count;
+        zend_object             std;
+    };
+
+    simdjson_spl_fixedarray_object *intern = (simdjson_spl_fixedarray_object *)((char *)Z_OBJ_P(obj) - XtOffsetOf(simdjson_spl_fixedarray_object, std));
+
+    if (intern->array.elements == NULL) {
+        ZEND_ASSERT(intern->array.size == 0);
+        simdjson_smart_str_appendl(buf, "[]", 2);
+        return SUCCESS;
+    }
+
+    ZEND_ASSERT(intern->array.size > 0);
+
+    simdjson_smart_str_appendc(buf, '[');
+    ++encoder->depth;
+
+    for (zend_long i = 0; i < intern->array.size; i++) {
+        simdjson_pretty_print_nl_ident(buf, encoder);
+        zval *current = &intern->array.elements[i];
+        if (UNEXPECTED(simdjson_encode_zval(buf, current, encoder) == FAILURE)) {
+            return FAILURE;
+        }
+        simdjson_smart_str_appendc(buf, ',');
+    }
+
+    ZSTR_LEN(buf->s)--; // remove last comma
+
+    if (UNEXPECTED(encoder->depth > encoder->max_depth)) {
+        encoder->error_code = SIMDJSON_ERROR_DEPTH;
+        return FAILURE;
+    }
+    --encoder->depth;
+
+    simdjson_pretty_print_nl_ident(buf, encoder);
+    simdjson_smart_str_appendc(buf, ']');
+
+    return SUCCESS;
+}
+#endif
+
 static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
 	zend_class_entry *ce = Z_OBJCE_P(val);
 	zend_object *obj = Z_OBJ_P(val);
@@ -879,6 +931,11 @@ again:
                 simdjson_encode_base64_object(buf, val);
                 return SUCCESS;
             }
+#if PHP_VERSION_ID >= 80300
+	        if (Z_OBJCE_P(val) == spl_ce_SplFixedArray) {
+	            return simdjson_encode_spl_fixedarray(buf, val, encoder);
+	        }
+#endif
 			if (instanceof_function_slow(Z_OBJCE_P(val), php_json_serializable_ce)) {
 				return simdjson_encode_serializable_object(buf, val, encoder);
 			}
