@@ -493,7 +493,7 @@ static zend_always_inline bool simdjson_is_simple_object(zval *val) {
 }
 
 static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
-	int need_comma = 0;
+	bool remove_comma = false;
 
 	/* Optimized version without rebuilding properties HashTable */
 	zend_object *obj = Z_OBJ_P(val);
@@ -525,12 +525,6 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simd
 			continue;
 		}
 
-		if (need_comma) {
-			simdjson_smart_str_appendc(buf, ',');
-		} else {
-			need_comma = 1;
-		}
-
 		simdjson_pretty_print_nl_ident(buf, encoder);
 
 		if (simdjson_escape_string(buf, prop_info->name, encoder) == FAILURE) {
@@ -544,6 +538,8 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simd
 			SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
 			return FAILURE;
 		}
+	    simdjson_smart_str_appendc(buf, ',');
+	    remove_comma = true;
 	}
 
 	SIMDJSON_HASH_UNPROTECT_RECURSION(obj);
@@ -553,15 +549,23 @@ static zend_result simdjson_encode_simple_object(smart_str *buf, zval *val, simd
 	}
 	--encoder->depth;
 
-	if (need_comma) {
-		simdjson_pretty_print_nl_ident(buf, encoder);
-	}
+    if (remove_comma) {
+        ZSTR_LEN(buf->s)--; // remove last comma
+        simdjson_pretty_print_nl_ident(buf, encoder);
+    }
+
 	simdjson_smart_str_appendc(buf, '}');
 	return SUCCESS;
 }
 
+// Helper that copies zend_release_properties without checking if ht == NULL
+static zend_always_inline void simdjson_release_properties(HashTable *ht) {
+    ZEND_ASSERT(ht);
+    zend_array_release(ht);
+}
+
 static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_encoder *encoder) {
-    int need_comma = 0;
+    bool remove_comma = false;
     HashTable *myht;
     zend_refcounted *recursion_rc;
 
@@ -582,7 +586,7 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
 
     if (UNEXPECTED(GC_IS_RECURSIVE(recursion_rc))) {
         encoder->error_code = SIMDJSON_ERROR_RECURSION;
-        zend_release_properties(myht);
+        simdjson_release_properties(myht);
         return FAILURE;
     }
 
@@ -592,93 +596,79 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
 
     ++encoder->depth;
 
-    uint32_t i = zend_hash_num_elements(myht);
+    zend_string *key;
+    zval *data;
+    zend_ulong index;
 
-    if (i > 0) {
-        zend_string *key;
-        zval *data;
-        zend_ulong index;
+    ZEND_HASH_FOREACH_KEY_VAL_IND(myht, index, key, data) {
+        zval tmp;
+        ZVAL_UNDEF(&tmp);
 
-        ZEND_HASH_FOREACH_KEY_VAL_IND(myht, index, key, data) {
-            zval tmp;
-            ZVAL_UNDEF(&tmp);
-
-            if (key) {
-                if (ZSTR_VAL(key)[0] == '\0' && ZSTR_LEN(key) > 0 && Z_TYPE_P(val) == IS_OBJECT) {
-                    /* Skip protected and private members. */
-                    continue;
-                }
+        if (key) {
+            if (ZSTR_VAL(key)[0] == '\0' && ZSTR_LEN(key) > 0 && Z_TYPE_P(val) == IS_OBJECT) {
+                /* Skip protected and private members. */
+                continue;
+            }
 
 #if PHP_VERSION_ID >= 80400
-                /* data is IS_PTR for properties with hooks. */
-                if (UNEXPECTED(Z_TYPE_P(data) == IS_PTR)) {
-                    zend_property_info *prop_info = (zend_property_info*)Z_PTR_P(data);
-                    if ((prop_info->flags & ZEND_ACC_VIRTUAL) && !prop_info->hooks[ZEND_PROPERTY_HOOK_GET]) {
-                        continue;
-                    }
-                    zend_read_property_ex(prop_info->ce, Z_OBJ_P(val), prop_info->name, /* silent */ true, &tmp);
-                    if (EG(exception)) {
-                        SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-                        zend_release_properties(myht);
-                        return FAILURE;
-                    }
-                    data = &tmp;
+            /* data is IS_PTR for properties with hooks. */
+            if (UNEXPECTED(Z_TYPE_P(data) == IS_PTR)) {
+                zend_property_info *prop_info = (zend_property_info*)Z_PTR_P(data);
+                if ((prop_info->flags & ZEND_ACC_VIRTUAL) && !prop_info->hooks[ZEND_PROPERTY_HOOK_GET]) {
+                    continue;
                 }
-#endif
-
-                if (need_comma) {
-                    simdjson_smart_str_appendc(buf, ',');
-                } else {
-                    need_comma = 1;
-                }
-
-                simdjson_pretty_print_nl_ident(buf, encoder);
-
-                if (simdjson_escape_string(buf, key, encoder) == FAILURE) {
+                zend_read_property_ex(prop_info->ce, Z_OBJ_P(val), prop_info->name, /* silent */ true, &tmp);
+                if (EG(exception)) {
                     SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-                    zend_release_properties(myht);
+                    simdjson_release_properties(myht);
                     return FAILURE;
                 }
-            } else {
-                if (need_comma) {
-                    simdjson_smart_str_appendc(buf, ',');
-                } else {
-                    need_comma = 1;
-                }
-
-                simdjson_pretty_print_nl_ident(buf, encoder);
-                simdjson_append_number_index(buf, index);
+                data = &tmp;
             }
+#endif
 
-            simdjson_pretty_print_colon(buf, encoder);
+            simdjson_pretty_print_nl_ident(buf, encoder);
 
-            if (simdjson_encode_zval(buf, data, encoder) == FAILURE) {
+            if (simdjson_escape_string(buf, key, encoder) == FAILURE) {
                 SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
-                zend_release_properties(myht);
-                zval_ptr_dtor(&tmp);
+                simdjson_release_properties(myht);
                 return FAILURE;
             }
+        } else {
+            simdjson_pretty_print_nl_ident(buf, encoder);
+            simdjson_append_number_index(buf, index);
+        }
+
+        simdjson_pretty_print_colon(buf, encoder);
+
+        if (simdjson_encode_zval(buf, data, encoder) == FAILURE) {
+            SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
+            simdjson_release_properties(myht);
             zval_ptr_dtor(&tmp);
-        } ZEND_HASH_FOREACH_END();
-    }
+            return FAILURE;
+        }
+        zval_ptr_dtor(&tmp);
+        simdjson_smart_str_appendc(buf, ',');
+        remove_comma = true;
+    } ZEND_HASH_FOREACH_END();
 
     SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
 
     if (encoder->depth > encoder->max_depth) {
         encoder->error_code = SIMDJSON_ERROR_DEPTH;
-        zend_release_properties(myht);
+        simdjson_release_properties(myht);
         return FAILURE;
     }
     --encoder->depth;
 
-    /* Only keep closing bracket on same line for empty arrays/objects */
-    if (need_comma) {
+    if (remove_comma) {
+        ZSTR_LEN(buf->s)--; // remove last comma
         simdjson_pretty_print_nl_ident(buf, encoder);
     }
 
     simdjson_smart_str_appendc(buf, '}');
 
-    zend_release_properties(myht);
+    simdjson_release_properties(myht);
     return SUCCESS;
 }
 
