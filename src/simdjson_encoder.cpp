@@ -631,6 +631,7 @@ static zend_result simdjson_encode_object(smart_str *buf, zval *val, simdjson_en
             if (simdjson_escape_string(buf, key, encoder) == FAILURE) {
                 SIMDJSON_HASH_UNPROTECT_RECURSION(recursion_rc);
                 simdjson_release_properties(myht);
+                zval_ptr_dtor(&tmp);
                 return FAILURE;
             }
         } else {
