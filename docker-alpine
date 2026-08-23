@@ -6,7 +6,6 @@ RUN apk add --no-cache --virtual .build-deps autoconf \
      gcc \
      make \
      pkgconf \
-     git \
      re2c
 
 COPY . /tmp/simdjson
