@@ -523,7 +523,8 @@ static void simdjson_create_array(simdjson_php_parser *parser, simdjson::dom::el
             }
             break;
         }
-        ZEND_UNREACHABLE();
+        default:
+            ZEND_UNREACHABLE();
     }
 }
 
@@ -596,7 +597,8 @@ static simdjson_php_error_code simdjson_create_object(simdjson_php_parser *parse
             }
             break;
         }
-        ZEND_UNREACHABLE();
+        default:
+            ZEND_UNREACHABLE();
     }
     return simdjson::SUCCESS;
 }
@@ -654,7 +656,8 @@ static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::va
             return element.get_bool().error();
         case simdjson::ondemand::json_type::null:
             return element.is_null().error();
-        ZEND_UNREACHABLE();
+        default:
+            ZEND_UNREACHABLE();
     }
     return simdjson::SUCCESS;
 }
