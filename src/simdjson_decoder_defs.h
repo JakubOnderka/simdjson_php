@@ -16,6 +16,15 @@
 #include "php.h"
 #include "simdjson.h"
 
+#if PHP_VERSION_ID >= 80600
+// Since PHP 8.6, HT_SIZE_* macros was converted to functions, so we have to compute array size
+#define SIMDJSON_DEDUP_DATA_SIZE(nTableSize) \
+    ((size_t)nTableSize) * sizeof(Bucket) + ((size_t)(-((uint32_t)(-(nTableSize + nTableSize))))) * sizeof(uint32_t)
+#else
+#define SIMDJSON_DEDUP_DATA_SIZE(nTableSize) \
+    HT_SIZE_EX(nTableSize, HT_SIZE_TO_MASK(nTableSize))
+#endif
+
 bool simdjson_realloc_needed(const zend_string *str);
 bool simdjson_simple_decode(const char *json, size_t len, zval *return_value, bool associative);
 
@@ -28,7 +37,7 @@ public:
     simdjson::ondemand::parser ondemand_parser;
     HashTable dedup_key_strings;
 #if PHP_VERSION_ID >= 80200
-    char dedup_key_strings_data[HT_SIZE_EX(SIMDJSON_DEDUP_STRING_COUNT, HT_SIZE_TO_MASK(SIMDJSON_DEDUP_STRING_COUNT))];
+    char dedup_key_strings_data[SIMDJSON_DEDUP_DATA_SIZE(SIMDJSON_DEDUP_STRING_COUNT)];
 #endif
 };
 
