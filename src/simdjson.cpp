@@ -1,4 +1,4 @@
-/* auto-generated on 2026-04-03 15:26:12 -0400. version 4.6.1 Do not edit! */
+/* auto-generated on 2026-08-23 15:51:58 +0200. version 4.6.11 Do not edit! */
 /* including simdjson.cpp:  */
 /* begin file simdjson.cpp */
 #define SIMDJSON_SRC_SIMDJSON_CPP
@@ -240,7 +240,7 @@ using std::size_t;
 #endif
 #elif defined(__PPC64__) || defined(_M_PPC64)
 #define SIMDJSON_IS_PPC64 1
-#if defined(__ALTIVEC__)
+#if defined(__ALTIVEC__) && defined(__POWER8_VECTOR__)
 #define SIMDJSON_IS_PPC64_VMX 1
 #endif // defined(__ALTIVEC__)
 #else
@@ -10052,9 +10052,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -10065,6 +10070,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -13547,7 +13553,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -13581,7 +13594,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -13603,7 +13616,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -13982,11 +13995,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -14011,6 +14019,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -14027,7 +14041,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -15234,6 +15248,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -16591,9 +16608,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -16604,6 +16626,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -19945,7 +19968,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -19979,7 +20009,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -20001,7 +20031,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -20380,11 +20410,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -20409,6 +20434,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -20425,7 +20456,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -21632,6 +21663,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -22985,9 +23019,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -22998,6 +23037,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -26338,7 +26378,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -26372,7 +26419,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -26394,7 +26441,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -26773,11 +26820,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -26802,6 +26844,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -26818,7 +26866,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -28025,6 +28073,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -29536,9 +29587,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -29549,6 +29605,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -33002,7 +33059,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -33036,7 +33100,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -33058,7 +33122,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -33437,11 +33501,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -33466,6 +33525,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -33482,7 +33547,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -34689,6 +34754,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -36447,9 +36515,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -36460,6 +36533,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -40228,7 +40302,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -40262,7 +40343,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -40284,7 +40365,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -40663,11 +40744,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -40692,6 +40768,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -40708,7 +40790,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -41915,6 +41997,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -43204,9 +43289,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -43217,6 +43307,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -46485,7 +46576,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -46519,7 +46617,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -46541,7 +46639,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -46920,11 +47018,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -46949,6 +47042,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -46965,7 +47064,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -48172,6 +48271,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -49398,9 +49500,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -49411,6 +49518,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -52646,7 +52754,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -52680,7 +52795,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -52702,7 +52817,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -53081,11 +53196,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -53110,6 +53220,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -53126,7 +53242,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -54333,6 +54449,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -55580,9 +55699,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -55593,6 +55717,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -59226,7 +59351,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -59260,7 +59392,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -59282,7 +59414,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -59661,11 +59793,6 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
     ((error != SUCCESS) && (error != UNCLOSED_STRING)) // when partial we tolerate UNCLOSED_STRING
     : (error != SUCCESS); // if partial is false, we must have SUCCESS
   const bool have_unclosed_string = (error == UNCLOSED_STRING);
-  if (simdjson_unlikely(should_we_exit)) { return error; }
-
-  if (unescaped_chars_error) {
-    return UNESCAPED_CHARS;
-  }
   parser.n_structural_indexes = uint32_t(indexer.tail - parser.structural_indexes.get());
   /***
    * The On-Demand API requires special padding.
@@ -59690,6 +59817,12 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
   parser.structural_indexes[parser.n_structural_indexes + 1] = uint32_t(len);
   parser.structural_indexes[parser.n_structural_indexes + 2] = 0;
   parser.next_structural_index = 0;
+
+  // Bail out only once the count and sentinels above are set:
+  // document_stream::truncated_bytes() reads them even on error.
+  if (simdjson_unlikely(should_we_exit)) { return error; }
+  if (unescaped_chars_error) { return UNESCAPED_CHARS; }
+
   // a valid JSON file cannot have zero structural indexes - we should have found something
   if (simdjson_unlikely(parser.n_structural_indexes == 0u)) {
     return EMPTY;
@@ -59706,7 +59839,7 @@ simdjson_inline error_code json_structural_indexer::finish(dom_parser_implementa
       if (simdjson_unlikely(parser.n_structural_indexes == 0u)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !have_unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
@@ -60913,6 +61046,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -61739,9 +61875,14 @@ inline dom_parser_implementation &dom_parser_implementation::operator=(dom_parse
 
 // Leaving these here so they can be inlined if so desired
 inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(size_t capacity) noexcept {
-  if(capacity > SIMDJSON_MAXSIZE_BYTES) { return CAPACITY; }
+  if(capacity > SIMDJSON_MAXSIZE_BYTES || capacity > SIZE_MAX - 63) { return CAPACITY; }
   // Stage 1 index output
-  size_t max_structures = SIMDJSON_ROUNDUP_N(capacity, 64) + 2 + 7;
+  size_t rounded_capacity = SIMDJSON_ROUNDUP_N(capacity, 64);
+  if(rounded_capacity + 9 < rounded_capacity) {
+    return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
+  }
+  size_t max_structures = rounded_capacity + 9;
+  if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
   structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
   if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
   structural_indexes[0] = 0;
@@ -61752,6 +61893,7 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 }
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
+  if(max_depth == 0 || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
   // Stage 2 stacks
   open_containers.reset(new (std::nothrow) open_container[max_depth]);
   is_array.reset(new (std::nothrow) bool[max_depth]);
@@ -63715,7 +63857,14 @@ namespace stage1 {
   * complete document, therefore the last json buffer location is the end of the
   * batch.
   */
-simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser) {
+simdjson_inline bool ends_with_partial_scalar(dom_parser_implementation &parser, size_t len) {
+  const uint8_t f = parser.buf[parser.structural_indexes[parser.n_structural_indexes - 1]];
+  const uint8_t e = parser.buf[len - 1];
+  return f != '{' && f != '[' && f != '}' && f != ']' && f != ':' && f != ',' && f != '"' &&
+         e != ' ' && e != '\t' && e != '\n' && e != '\r';
+}
+
+simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &parser, bool defer_last = false) {
   // Variant: do not count separately, just figure out depth
   if(parser.n_structural_indexes == 0) { return 0; }
   auto arr_cnt = 0;
@@ -63749,7 +63898,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
     }
     // Last document is complete, so the next document will appear after!
     if (!arr_cnt && !obj_cnt) {
-      return parser.n_structural_indexes;
+      return defer_last ? i : parser.n_structural_indexes;
     }
     // Last document is incomplete; mark the document at i + 1 as the next one
     return i;
@@ -63771,7 +63920,7 @@ simdjson_inline uint32_t find_next_document_index(dom_parser_implementation &par
   }
   if (!arr_cnt && !obj_cnt) {
     // We have a complete document.
-    return parser.n_structural_indexes;
+    return defer_last ? 0 : parser.n_structural_indexes;
   }
   return 0;
 }
@@ -64787,6 +64936,9 @@ simdjson_warn_unused simdjson_inline error_code tape_builder::visit_number(json_
     const uint8_t *p = value;
     if (*p == '-') p++;
     while (numberparsing::is_digit(*p)) p++;
+    // The digit run must be terminated by a structural or whitespace character; otherwise the
+    // token is malformed (e.g. "123456789123456789123x").
+    if (jsoncharutils::is_not_structural_or_whitespace(*p)) { return NUMBER_ERROR; }
     size_t len = size_t(p - value);
     tape.append(current_string_buf_loc - iter.dom_parser.doc->string_buf.get(), internal::tape_type::BIGINT);
     uint8_t *dst = current_string_buf_loc + sizeof(uint32_t);
@@ -64976,8 +65128,8 @@ simdjson_inline void validate_utf8_character() {
   // 2-byte
   if ((buf[idx] & 0x20) == 0) {
     // missing continuation
-    if (simdjson_unlikely(idx+1 > len || !is_continuation(buf[idx+1]))) {
-      if (idx+1 > len && is_streaming(partial)) { idx = len; return; }
+    if (simdjson_unlikely(idx+1 >= len || !is_continuation(buf[idx+1]))) {
+      if (idx+1 >= len && is_streaming(partial)) { idx = len; return; }
       error = UTF8_ERROR;
       idx++;
       return;
@@ -64991,8 +65143,8 @@ simdjson_inline void validate_utf8_character() {
   // 3-byte
   if ((buf[idx] & 0x10) == 0) {
     // missing continuation
-    if (simdjson_unlikely(idx+2 > len || !is_continuation(buf[idx+1]) || !is_continuation(buf[idx+2]))) {
-      if (idx+2 > len && is_streaming(partial)) { idx = len; return; }
+    if (simdjson_unlikely(idx+2 >= len || !is_continuation(buf[idx+1]) || !is_continuation(buf[idx+2]))) {
+      if (idx+2 >= len && is_streaming(partial)) { idx = len; return; }
       error = UTF8_ERROR;
       idx++;
       return;
@@ -65007,8 +65159,8 @@ simdjson_inline void validate_utf8_character() {
 
   // 4-byte
   // missing continuation
-  if (simdjson_unlikely(idx+3 > len || !is_continuation(buf[idx+1]) || !is_continuation(buf[idx+2]) || !is_continuation(buf[idx+3]))) {
-    if (idx+2 > len && is_streaming(partial)) { idx = len; return; }
+  if (simdjson_unlikely(idx+3 >= len || !is_continuation(buf[idx+1]) || !is_continuation(buf[idx+2]) || !is_continuation(buf[idx+3]))) {
+    if (idx+3 >= len && is_streaming(partial)) { idx = len; return; }
     error = UTF8_ERROR;
     idx++;
     return;
@@ -65130,9 +65282,15 @@ simdjson_warn_unused simdjson_inline error_code scan() {
       add_structural();
     // Primitive or invalid character (invalid characters will be checked in stage 2)
     } else {
-      // Anything else, add the structural and go until we find the next one
+      // Anything else, add the structural and go until we find the next one.
+      // We also stop on '"' so that an unclosed string still reaches
+      // validate_string(); a quote swallowed by the run would hide it. A
+      // quote cannot occur inside a valid primitive. We deliberately do not
+      // stop on every ESC_ASCII character: that also covers a backslash and the
+      // control characters, and ending the run there makes the fallback
+      // disagree with the SIMD kernels.
       add_structural();
-      while (idx+1<len && !char_is_space_or_operator(buf[idx+1])) {
+      while (idx+1<len && !char_is_space_or_operator(buf[idx+1]) && buf[idx+1] != '"') {
         idx++;
       };
     }
@@ -65152,7 +65310,7 @@ simdjson_warn_unused simdjson_inline error_code scan() {
       if (simdjson_unlikely(parser.n_structural_indexes == 0)) { return CAPACITY; }
     }
     // We truncate the input to the end of the last complete document (or zero).
-    auto new_structural_indexes = find_next_document_index(parser);
+    auto new_structural_indexes = find_next_document_index(parser, !unclosed_string && ends_with_partial_scalar(parser, len));
     if (new_structural_indexes == 0 && parser.n_structural_indexes > 0) {
       if(parser.structural_indexes[0] == 0) {
         // If the buffer is partial and we started at index 0 but the document is
