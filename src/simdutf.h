@@ -1,4 +1,4 @@
-/* auto-generated on 2026-09-13 12:42:40.305120. Do not edit! */
+/* auto-generated on 2026-09-24 16:10:24.322715. Do not edit! */
 /* begin file include/simdutf.h */
 #ifndef SIMDUTF_H
 #define SIMDUTF_H
@@ -941,7 +941,7 @@ SIMDUTF_DISABLE_UNDESIRED_WARNINGS
 #define SIMDUTF_SIMDUTF_VERSION_H
 
 /** The version of simdutf being used (major.minor.revision) */
-#define SIMDUTF_VERSION "9.1.2"
+#define SIMDUTF_VERSION "9.2.1"
 
 namespace simdutf {
 enum {
@@ -952,11 +952,11 @@ enum {
   /**
    * The minor version (major.MINOR.revision) of simdutf being used.
    */
-  SIMDUTF_VERSION_MINOR = 1,
+  SIMDUTF_VERSION_MINOR = 2,
   /**
    * The revision (major.minor.REVISION) of simdutf being used.
    */
-  SIMDUTF_VERSION_REVISION = 2
+  SIMDUTF_VERSION_REVISION = 1
 };
 } // namespace simdutf
 
@@ -1054,6 +1054,17 @@ struct simdutf_riscv_hwprobe {
 // #define HWCAP_LOONGARCH_LSX             (1 << 4)
 // #define HWCAP_LOONGARCH_LASX            (1 << 5)
 #endif
+#if defined(__aarch64__) && defined(__linux__)
+  #include <sys/auxv.h>
+#endif
+#if (defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)) &&      \
+    defined(_WIN32) && !defined(_WINDOWS_)
+// We avoid including <windows.h> (macro pollution); this matches the
+// declaration in the Windows SDK (BOOL WINAPI
+// IsProcessorFeaturePresent(DWORD)).
+extern "C" __declspec(dllimport) int __stdcall IsProcessorFeaturePresent(
+    unsigned long ProcessorFeature);
+#endif
 
 namespace simdutf {
 namespace internal {
@@ -1081,6 +1092,8 @@ enum instruction_set {
   ZVBB = 0x8000,
   LSX = 0x40000,
   LASX = 0x80000,
+  SVE = 0x100000,
+  SVE2 = 0x200000,
 };
 
 #if defined(__PPC64__)
@@ -1120,8 +1133,60 @@ static inline uint32_t detect_supported_architectures() {
 
 #elif defined(__aarch64__) || defined(_M_ARM64) || defined(_M_ARM64EC)
 
+  #if defined(__linux__)
+    // The kernel advertises SVE in AT_HWCAP and SVE2 in AT_HWCAP2. Older
+    // headers may not define these constants, so we provide the kernel's values
+    // (we deliberately do not include <asm/hwcap.h>, which is not available on
+    // all toolchains, e.g., musl without linux-headers).
+    #ifndef AT_HWCAP2
+      #define AT_HWCAP2 26
+    #endif
+    #ifndef HWCAP_SVE
+      #define HWCAP_SVE (1 << 22)
+    #endif
+    #ifndef HWCAP2_SVE2
+      #define HWCAP2_SVE2 (1 << 1)
+    #endif
+  #endif // __linux__
+
+  #if defined(_WIN32)
+    // Only recent Windows SDKs define these processor features.
+    #ifndef PF_ARM_SVE_INSTRUCTIONS_AVAILABLE
+      #define PF_ARM_SVE_INSTRUCTIONS_AVAILABLE 46
+    #endif
+    #ifndef PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE
+      #define PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE 47
+    #endif
+  #endif // _WIN32
+
 static inline uint32_t detect_supported_architectures() {
-  return instruction_set::NEON;
+  // NEON is mandatory on AArch64.
+  uint32_t host_isa = instruction_set::NEON;
+  #if defined(__linux__)
+  unsigned long hwcap = getauxval(AT_HWCAP);
+  unsigned long hwcap2 = getauxval(AT_HWCAP2);
+  if (hwcap & HWCAP_SVE) {
+    host_isa |= instruction_set::SVE;
+    // We only claim SVE2 when SVE is also present. Before Linux 6.14, the
+    // kernel set HWCAP2_SVE2 on processors implementing SME(2) but not SVE,
+    // because SVE2 instructions are available in streaming mode. Our SVE2
+    // code runs in non-streaming mode and needs actual SVE.
+    if (hwcap2 & HWCAP2_SVE2) {
+      host_isa |= instruction_set::SVE2;
+    }
+  }
+  #elif defined(_WIN32)
+  if (IsProcessorFeaturePresent(PF_ARM_SVE_INSTRUCTIONS_AVAILABLE)) {
+    host_isa |= instruction_set::SVE;
+    // As on Linux, require SVE before claiming SVE2.
+    if (IsProcessorFeaturePresent(PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE)) {
+      host_isa |= instruction_set::SVE2;
+    }
+  }
+  #endif
+  // On other systems (e.g., macOS, where Apple Silicon has no SVE), we only
+  // report NEON.
+  return host_isa;
 }
 
 #elif defined(__x86_64__) || defined(_M_AMD64) // x64
@@ -2037,6 +2102,28 @@ inline size_t convert_safe(const char *buf, size_t len, char *utf8_output,
   return utf8_pos;
 }
 
+inline full_result convert_safe_with_details(const char *buf, size_t len,
+                                             char *utf8_output,
+                                             size_t utf8_len) {
+  const size_t output_count = convert_safe(buf, len, utf8_output, utf8_len);
+  // Recover the consumed input count from the completed output. The runtime
+  // safe converter uses this helper only for its short scalar tail.
+  size_t input_count = 0;
+  size_t counted_output = 0;
+  while (input_count < len) {
+    const size_t width =
+        uint8_t(buf[input_count]) < uint8_t(0x80) ? size_t(1) : size_t(2);
+    if (counted_output + width > output_count) {
+      break;
+    }
+    input_count++;
+    counted_output += width;
+  }
+  return full_result(input_count == len ? error_code::SUCCESS
+                                        : error_code::OUTPUT_BUFFER_TOO_SMALL,
+                     input_count, output_count);
+}
+
 template <typename InputPtr, typename OutputPtr>
 #if SIMDUTF_CPLUSPLUS20
   requires(simdutf::detail::indexes_into_byte_like<InputPtr> &&
@@ -2063,6 +2150,31 @@ simdutf_constexpr23 size_t convert_safe_constexpr(InputPtr data, size_t len,
     }
   }
   return utf8_pos;
+}
+
+template <typename InputPtr, typename OutputPtr>
+#if SIMDUTF_CPLUSPLUS20
+  requires(simdutf::detail::indexes_into_byte_like<InputPtr> &&
+           simdutf::detail::index_assignable_from_char<OutputPtr>)
+#endif
+simdutf_constexpr23 full_result convert_safe_with_details_constexpr(
+    InputPtr data, size_t len, OutputPtr utf8_output, size_t utf8_len) {
+  const size_t output_count =
+      convert_safe_constexpr(data, len, utf8_output, utf8_len);
+  size_t input_count = 0;
+  size_t counted_output = 0;
+  while (input_count < len) {
+    const size_t width =
+        uint8_t(data[input_count]) < uint8_t(0x80) ? size_t(1) : size_t(2);
+    if (counted_output + width > output_count) {
+      break;
+    }
+    input_count++;
+    counted_output += width;
+  }
+  return full_result(input_count == len ? error_code::SUCCESS
+                                        : error_code::OUTPUT_BUFFER_TOO_SMALL,
+                     input_count, output_count);
 }
 
 template <typename InputPtr>
@@ -2911,6 +3023,71 @@ simdutf_constexpr23 size_t convert_with_replacement(const char16_t *data,
     }
   }
   return utf8_output - start;
+}
+
+template <endianness big_endian, typename InputPtr, typename OutputPtr>
+#if SIMDUTF_CPLUSPLUS20
+  requires(simdutf::detail::indexes_into_utf16<InputPtr> &&
+           simdutf::detail::index_assignable_from_char<OutputPtr>)
+#endif
+simdutf_constexpr23 full_result convert_with_replacement_safe(
+    InputPtr data, size_t len, OutputPtr utf8_output, size_t utf8_len) {
+  if (len == 0) {
+    return full_result(error_code::SUCCESS, 0, 0);
+  }
+  if (utf8_len == 0) {
+    return full_result(error_code::OUTPUT_BUFFER_TOO_SMALL, 0, 0);
+  }
+
+  size_t input_count = 0;
+  size_t output_count = 0;
+  while (input_count < len) {
+    full_result r = convert_with_errors<big_endian, true>(
+        data + input_count, len - input_count, utf8_output + output_count,
+        utf8_len - output_count);
+    input_count += r.input_count;
+    output_count += r.output_count;
+
+    if (r.error == error_code::SUCCESS) {
+      return full_result(error_code::SUCCESS, input_count, output_count);
+    }
+
+    if (r.error == error_code::OUTPUT_BUFFER_TOO_SMALL) {
+      if (utf8_len - output_count < 3) {
+        return full_result(r.error, input_count, output_count);
+      }
+
+      uint16_t word = !match_system(big_endian)
+                          ? u16_swap_bytes(data[input_count])
+                          : data[input_count];
+      bool unpaired = (word & 0xfc00) == 0xdc00;
+      if ((word & 0xfc00) == 0xd800) {
+        if (input_count + 1 == len) {
+          unpaired = true;
+        } else {
+          const uint16_t next_word = !match_system(big_endian)
+                                         ? u16_swap_bytes(data[input_count + 1])
+                                         : data[input_count + 1];
+          unpaired = (next_word & 0xfc00) != 0xdc00;
+        }
+      }
+      if (!unpaired) {
+        return full_result(r.error, input_count, output_count);
+      }
+    } else if (r.error != error_code::SURROGATE) {
+      return full_result(r.error, input_count, output_count);
+    }
+
+    if (utf8_len - output_count < 3) {
+      return full_result(error_code::OUTPUT_BUFFER_TOO_SMALL, input_count,
+                         output_count);
+    }
+    utf8_output[output_count++] = char(0xef);
+    utf8_output[output_count++] = char(0xbf);
+    utf8_output[output_count++] = char(0xbd);
+    input_count++;
+  }
+  return full_result(error_code::SUCCESS, input_count, output_count);
 }
 
 } // namespace utf16_to_utf8
@@ -5231,6 +5408,41 @@ convert_latin1_to_utf8_safe(
     #endif
   {
     return convert_latin1_to_utf8_safe(
+        reinterpret_cast<const char *>(input.data()), input.size(),
+        reinterpret_cast<char *>(utf8_output.data()), utf8_output.size());
+  }
+}
+  #endif // SIMDUTF_SPAN
+
+/**
+ * Convert a Latin1 string into a size-limited UTF-8 buffer and report how much
+ * input was consumed and output was written.
+ *
+ * We write as many complete characters as possible. The returned error is
+ * SUCCESS if all input was consumed, or OUTPUT_BUFFER_TOO_SMALL otherwise.
+ *
+ * @param input         the Latin1 string to convert
+ * @param length        the length of the string in bytes
+ * @param utf8_output   the pointer to the output buffer
+ * @param utf8_len      the maximum output length
+ * @return a full_result with error, input_count and output_count
+ */
+simdutf_warn_unused full_result convert_latin1_to_utf8_safe_with_details(
+    const char *input, size_t length, char *utf8_output,
+    size_t utf8_len) noexcept;
+  #if SIMDUTF_SPAN
+simdutf_really_inline simdutf_warn_unused simdutf_constexpr23 full_result
+convert_latin1_to_utf8_safe_with_details(
+    const detail::input_span_of_byte_like auto &input,
+    detail::output_span_of_byte_like auto &&utf8_output) noexcept {
+    #if SIMDUTF_CPLUSPLUS23
+  if consteval {
+    return scalar::latin1_to_utf8::convert_safe_with_details_constexpr(
+        input.data(), input.size(), utf8_output.data(), utf8_output.size());
+  } else
+    #endif
+  {
+    return convert_latin1_to_utf8_safe_with_details(
         reinterpret_cast<const char *>(input.data()), input.size(),
         reinterpret_cast<char *>(utf8_output.data()), utf8_output.size());
   }
