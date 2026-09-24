@@ -1,4 +1,4 @@
-/* auto-generated on 2026-09-13 12:42:40.305120. Do not edit! */
+/* auto-generated on 2026-09-24 16:10:24.322715. Do not edit! */
 /* begin file src/simdutf.cpp */
 #include "simdutf.h"
 
@@ -1970,30 +1970,17 @@ namespace {
 } // namespace
 #endif // SIMDUTF_REGULAR_VISUAL_STUDIO
 
-// Returns true if any lane of `mask` is set. The argument *must* be the result
-// of a lane-wise comparison, i.e. each byte must be either 0x00 or 0xff. The
-// lane width of the comparison is irrelevant: byte and 32-bit masks should be
-// reinterpreted with vreinterpretq_u16_u8 / vreinterpretq_u16_u32 by the
-// caller.
+// Returns true if any lane of `mask` is non-zero.
 //
-// This compiles to two instructions (shrn + fcmp) and, unlike a reduction such
-// as vmaxvq_u8, it never moves the value to a general-purpose register. Such a
-// transfer has a latency of about 3 cycles on Apple hardware, on top of the 3
-// cycles of the reduction itself.
-//
-// Both steps rely on the input being a comparison mask. The narrowing shift
-// keeps bits 4..11 of each 16-bit lane, so it only preserves 'is non-zero' when
-// every byte is 0x00 or 0xff. The floating-point comparison is safe for the
-// same reason: the only non-zero bit pattern that compares equal to 0.0 is -0.0
-// (0x8000000000000000), and the most significant byte of the narrowed value can
-// only be 0x00, 0x0f, 0xf0 or 0xff.
+// A 32-bit umaxv is used rather than vmaxvq_u8/u16, which is slower on some
+// cores. A floating-point compare against 0.0 is avoided because flush-to-zero
+// makes denormal bit patterns compare equal to zero.
 //
 // There is deliberately a single overload: Visual Studio defines every 128-bit
 // NEON type as the same union type, so overloading on uint8x16_t, uint16x8_t
 // and uint32x4_t does not compile there.
 simdutf_really_inline bool any_lane_set(const uint16x8_t mask) {
-  const uint8x8_t narrowed = vshrn_n_u16(mask, 4);
-  return vget_lane_f64(vreinterpret_f64_u8(narrowed), 0) != 0.0;
+  return vmaxvq_u32(vreinterpretq_u32_u16(mask)) != 0;
 }
 
 template <typename T> struct simd8;
@@ -2923,7 +2910,7 @@ template <> struct simd32<bool> {
   simdutf_really_inline simd32(const uint32x4_t v) : value(v) {}
 
   // simd32<bool> is only ever produced by lane-wise comparisons (and bitwise
-  // combinations thereof), so the cheap any_lane_set is always applicable.
+  // combinations thereof), so any_lane_set is always applicable.
   simdutf_really_inline bool any() const {
     return any_lane_set(vreinterpretq_u16_u32(value));
   }
@@ -11100,9 +11087,11 @@ simdutf_warn_unused full_result base64_to_binary_details(
 
 // moved to implementation.h
 // simdutf_warn_unused bool base64_ignorable(char input,
-//                                           base64_options options) noexcept
+//                                           base64_options options)
+//                                           noexcept
 // simdutf_warn_unused bool base64_ignorable(char16_t input,
-//                                           base64_options options) noexcept
+//                                           base64_options options)
+//                                           noexcept
 // simdutf_warn_unused bool base64_valid(char input,
 //                                       base64_options options) noexcept
 // simdutf_warn_unused bool base64_valid(char16_t input,
@@ -11163,6 +11152,36 @@ simdutf_warn_unused size_t convert_latin1_to_utf8_safe(
       scalar::latin1_to_utf8::convert_safe(buf, len, utf8_output, utf8_len);
 
   return utf8_output - start;
+}
+
+simdutf_warn_unused full_result convert_latin1_to_utf8_safe_with_details(
+    const char *buf, size_t len, char *utf8_output, size_t utf8_len) noexcept {
+  size_t input_count = 0;
+  size_t output_count = 0;
+
+  while (true) {
+    // convert_latin1_to_utf8 will never write more than input length * 2
+    auto read_len = detail::min(len, utf8_len >> 1);
+    if (read_len <= 16) {
+      break;
+    }
+
+    const auto write_len =
+        simdutf::convert_latin1_to_utf8(buf, read_len, utf8_output);
+
+    utf8_output += write_len;
+    utf8_len -= write_len;
+    buf += read_len;
+    len -= read_len;
+    input_count += read_len;
+    output_count += write_len;
+  }
+
+  full_result r = scalar::latin1_to_utf8::convert_safe_with_details(
+      buf, len, utf8_output, utf8_len);
+  r.input_count += input_count;
+  r.output_count += output_count;
+  return r;
 }
 
 simdutf_warn_unused result
@@ -17188,24 +17207,23 @@ simdutf_really_inline __m256i lookup_pshufb_improved(const __m256i input) {
   // Precomputed shuffle masks for K = 1 to 16
   // credit: Wojciech Muła
   __m256i result = _mm256_subs_epu8(input, _mm256_set1_epi8(51));
-  const __m256i less = _mm256_cmpgt_epi8(_mm256_set1_epi8(26), input);
   result =
-      _mm256_or_si256(result, _mm256_and_si256(less, _mm256_set1_epi8(13)));
+      _mm256_sub_epi8(result, _mm256_cmpgt_epi8(input, _mm256_set1_epi8(25)));
   __m256i shift_LUT;
   if (base64_url) {
     shift_LUT = _mm256_setr_epi8(
-        'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '-' - 62, '_' - 63, 'A', 0, 0,
-
-        'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '-' - 62, '_' - 63, 'A', 0, 0);
+        'A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '-' - 62, '_' - 63, 0,
+        0, 'A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '-' - 62, '_' - 63, 0,
+        0);
   } else {
     shift_LUT = _mm256_setr_epi8(
-        'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '+' - 62, '/' - 63, 'A', 0, 0,
-
-        'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '+' - 62, '/' - 63, 'A', 0, 0);
+        'A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '+' - 62, '/' - 63, 0,
+        0, 'A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+        '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52, '+' - 62, '/' - 63, 0,
+        0);
   }
 
   result = _mm256_shuffle_epi8(shift_LUT, result);
@@ -17267,29 +17285,28 @@ avx2_encode_base64_impl(char *dst, const char *src, size_t srclen,
       _mm256_set_epi8(10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1,
 
                       10, 11, 9, 10, 7, 8, 6, 7, 4, 5, 3, 4, 1, 2, 0, 1);
+  const __m256i shuf_overlap =
+      _mm256_setr_epi8(5, 4, 6, 5, 8, 7, 9, 8, 11, 10, 12, 11, 14, 13, 15, 14,
+                       1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10);
   size_t i = 0;
   for (; i + 100 <= srclen; i += 96) {
     const __m128i lo0 = _mm_loadu_si128(
         reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 0));
     const __m128i hi0 = _mm_loadu_si128(
         reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 1));
-    const __m128i lo1 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 2));
-    const __m128i hi1 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 3));
-    const __m128i lo2 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 4));
-    const __m128i hi2 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 5));
-    const __m128i lo3 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 6));
-    const __m128i hi3 = _mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(input + i + 4 * 3 * 7));
-
     __m256i in0 = _mm256_shuffle_epi8(_mm256_set_m128i(hi0, lo0), shuf);
-    __m256i in1 = _mm256_shuffle_epi8(_mm256_set_m128i(hi1, lo1), shuf);
-    __m256i in2 = _mm256_shuffle_epi8(_mm256_set_m128i(hi2, lo2), shuf);
-    __m256i in3 = _mm256_shuffle_epi8(_mm256_set_m128i(hi3, lo3), shuf);
+    __m256i in1 = _mm256_shuffle_epi8(
+        _mm256_loadu_si256(
+            reinterpret_cast<const __m256i *>(input + i + 24 - 4)),
+        shuf_overlap);
+    __m256i in2 = _mm256_shuffle_epi8(
+        _mm256_loadu_si256(
+            reinterpret_cast<const __m256i *>(input + i + 48 - 4)),
+        shuf_overlap);
+    __m256i in3 = _mm256_shuffle_epi8(
+        _mm256_loadu_si256(
+            reinterpret_cast<const __m256i *>(input + i + 72 - 4)),
+        shuf_overlap);
 
     const __m256i t0_0 = _mm256_and_si256(in0, _mm256_set1_epi32(0x0fc0fc00));
     const __m256i t0_1 = _mm256_and_si256(in1, _mm256_set1_epi32(0x0fc0fc00));
@@ -17562,7 +17579,11 @@ simdutf_really_inline void compress(__m256i data, uint32_t mask, char *output) {
            output + count_ones(~mask & 0xFFFF));
 }
 
-template <typename = void>
+// exact_tail: the high 16-byte store would write 4 bytes past the 24 bytes
+// this call produces. The second half of a 64-byte block passes true so the
+// block ends on byte 48. The first half keeps the overlapping store; the
+// next call overwrites those 4 bytes.
+template <bool exact_tail = false>
 simdutf_really_inline void base64_decode(char *out, __m256i str) {
   // credit: aqrit
   const __m256i pack_shuffle =
@@ -17574,26 +17595,23 @@ simdutf_really_inline void base64_decode(char *out, __m256i str) {
 
   // Store the output:
   _mm_storeu_si128((__m128i *)out, _mm256_castsi256_si128(t2));
-  _mm_storeu_si128((__m128i *)(out + 12), _mm256_extracti128_si256(t2, 1));
+  const __m128i hi = _mm256_extracti128_si256(t2, 1);
+  if constexpr (exact_tail) {
+    _mm_storel_epi64((__m128i *)(out + 12), hi);
+    const int32_t last = _mm_extract_epi32(hi, 2);
+    std::memcpy(out + 20, &last, sizeof(last));
+  } else {
+    _mm_storeu_si128((__m128i *)(out + 12), hi);
+  }
 }
 
-template <typename = void>
+template <bool exact_tail = false>
 simdutf_really_inline void base64_decode_block(char *out, const char *src) {
   base64_decode(out,
                 _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src)));
-  base64_decode(out + 24, _mm256_loadu_si256(
-                              reinterpret_cast<const __m256i *>(src + 32)));
-}
-
-template <typename = void>
-simdutf_really_inline void base64_decode_block_safe(char *out,
-                                                    const char *src) {
-  base64_decode(out,
-                _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src)));
-  alignas(32) char buffer[32]; // We enforce safety with a buffer.
-  base64_decode(
-      buffer, _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + 32)));
-  std::memcpy(out + 24, buffer, 24);
+  base64_decode<exact_tail>(
+      out + 24,
+      _mm256_loadu_si256(reinterpret_cast<const __m256i *>(src + 32)));
 }
 
 // --- decoding - base64 class --------------------------------
@@ -17635,16 +17653,10 @@ public:
   }
 
   // decode 64 bytes and output 48 bytes
+  template <bool exact_tail = false>
   simdutf_really_inline void base64_decode_block(char *out) {
     base64_decode(out, chunks[0]);
-    base64_decode(out + 24, chunks[1]);
-  }
-
-  simdutf_really_inline void base64_decode_block_safe(char *out) {
-    base64_decode(out, chunks[0]);
-    alignas(32) char buffer[32]; // We enforce safety with a buffer.
-    base64_decode(buffer, chunks[1]);
-    std::memcpy(out + 24, buffer, 24);
+    base64_decode<exact_tail>(out + 24, chunks[1]);
   }
 
   template <bool base64_url, bool ignore_garbage, bool default_or_url>
@@ -18887,12 +18899,6 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
     return {SUCCESS, full_input_length, 0};
   }
-  char *end_of_safe_64byte_zone =
-      dst == nullptr
-          ? nullptr
-          : ((srclen + 3) / 4 * 3 >= 63 ? dst + (srclen + 3) / 4 * 3 - 63
-                                        : dst);
-
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
   const chartype *const srcend = src + srclen;
@@ -18901,31 +18907,54 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   static_assert(block_size >= 2, "block_size must be at least two");
   char buffer[block_size * 64];
   char *bufferptr = buffer;
+  // A wide block store writes 4 bytes past its 48. That is safe when the next
+  // store starts 48 bytes later. Pairs of clean blocks wide-store the first
+  // and end the second on byte 48. Anything shorter, or a block that is not
+  // clean, uses the exact store. The pair attempt is only worth it on a long
+  // input: a short one often fails the first block and then repeats that work.
+  if (srclen >= 512) {
+    const chartype *const srcend128 = src + srclen - 128;
+    while (bufferptr == buffer && src <= srcend128) {
+      block64 b0(src);
+      uint64_t e0 = 0;
+      const uint64_t m0 =
+          b0.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e0);
+      if ((!ignore_garbage && e0) || m0 != 0) {
+        break;
+      }
+      block64 b1(src + 64);
+      uint64_t e1 = 0;
+      const uint64_t m1 =
+          b1.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e1);
+      if ((!ignore_garbage && e1) || m1 != 0) {
+        break;
+      }
+      b0.base64_decode_block(dst);
+      b1.template base64_decode_block<true>(dst + 48);
+      src += 128;
+      dst += 96;
+    }
+  }
   if (srclen >= 64) {
-    const chartype *const srcend64 = src + srclen - 64;
+    const chartype *const srcend64 = srcinit + srclen - 64;
     while (src <= srcend64) {
       block64 b(src);
-      src += 64;
       uint64_t error = 0;
       const uint64_t badcharmask =
           b.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&error);
       if (!ignore_garbage && error) {
-        src -= 64;
         const size_t error_offset = trailing_zeroes(error);
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
       } else if (bufferptr != buffer) {
         b.copy_block(bufferptr);
         bufferptr += 64;
       } else {
-        if (dst >= end_of_safe_64byte_zone) {
-          b.base64_decode_block_safe(dst);
-        } else {
-          b.base64_decode_block(dst);
-        }
+        b.template base64_decode_block<true>(dst);
         dst += 48;
       }
       if (bufferptr >= (block_size - 1) * 64 + buffer) {
@@ -18933,11 +18962,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           base64_decode_block(dst, buffer + i * 64);
           dst += 48;
         }
-        if (dst >= end_of_safe_64byte_zone) {
-          base64_decode_block_safe(dst, buffer + (block_size - 2) * 64);
-        } else {
-          base64_decode_block(dst, buffer + (block_size - 2) * 64);
-        }
+        base64_decode_block<true>(dst, buffer + (block_size - 2) * 64);
         dst += 48;
         std::memcpy(buffer, buffer + (block_size - 1) * 64,
                     64); // 64 might be too much
@@ -18966,10 +18991,14 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
 
   for (; buffer_start + 64 <= bufferptr; buffer_start += 64) {
-    if (dst >= end_of_safe_64byte_zone) {
-      base64_decode_block_safe(dst, buffer_start);
-    } else {
+    // 8 payload bytes still in the buffer become 6 output bytes, which cover
+    // the 4-byte tail of a wide store. Fewer than that, and the tail can
+    // stick out past the real end.
+    const size_t after = size_t(bufferptr - (buffer_start + 64));
+    if (after >= 8) {
       base64_decode_block(dst, buffer_start);
+    } else {
+      base64_decode_block<true>(dst, buffer_start);
     }
     dst += 48;
   }
@@ -21369,28 +21398,27 @@ static simdutf_really_inline vector_u8 decoding_pack(vector_u8 input) {
   return t;
 #endif // SIMDUTF_IS_BIG_ENDIAN
 }
+// exact: store 12 bytes. Otherwise store 16 and let the next lane cover the
+// extra 4. Only the last lane of a block passes true.
+template <bool exact = false>
 static simdutf_really_inline void base64_decode(char *out, vector_u8 input) {
   const auto expanded = decoding_pack(input);
-  expanded.store(out);
+  if constexpr (exact) {
+    alignas(16) char tmp[16];
+    expanded.store(tmp);
+    std::memcpy(out, tmp, 12);
+  } else {
+    expanded.store(out);
+  }
 }
 
+template <bool exact = false>
 static simdutf_really_inline void base64_decode_block(char *out,
                                                       const char *src) {
   base64_decode(out + 12 * 0, vector_u8::load(src + 0 * 16));
   base64_decode(out + 12 * 1, vector_u8::load(src + 1 * 16));
   base64_decode(out + 12 * 2, vector_u8::load(src + 2 * 16));
-  base64_decode(out + 12 * 3, vector_u8::load(src + 3 * 16));
-}
-
-static simdutf_really_inline void base64_decode_block_safe(char *out,
-                                                           const char *src) {
-  base64_decode(out + 12 * 0, vector_u8::load(src + 0 * 16));
-  base64_decode(out + 12 * 1, vector_u8::load(src + 1 * 16));
-  base64_decode(out + 12 * 2, vector_u8::load(src + 2 * 16));
-
-  char buffer[16];
-  base64_decode(buffer, vector_u8::load(src + 3 * 16));
-  std::memcpy(out + 36, buffer, 12);
+  base64_decode<exact>(out + 12 * 3, vector_u8::load(src + 3 * 16));
 }
 
 // ---base64 decoding::block64 class --------------------------
@@ -21538,20 +21566,12 @@ public:
     return count_ones(nmask);
   }
 
+  template <bool exact = false>
   simdutf_really_inline void base64_decode_block(char *out) {
     base64_decode(out + 12 * 0, b.chunks[0]);
     base64_decode(out + 12 * 1, b.chunks[1]);
     base64_decode(out + 12 * 2, b.chunks[2]);
-    base64_decode(out + 12 * 3, b.chunks[3]);
-  }
-
-  simdutf_really_inline void base64_decode_block_safe(char *out) {
-    base64_decode(out + 12 * 0, b.chunks[0]);
-    base64_decode(out + 12 * 1, b.chunks[1]);
-    base64_decode(out + 12 * 2, b.chunks[2]);
-    char buffer[16];
-    base64_decode(buffer, b.chunks[3]);
-    std::memcpy(out + 12 * 3, buffer, 12);
+    base64_decode<exact>(out + 12 * 3, b.chunks[3]);
   }
 };
 /* end file src/ppc64/ppc64_base64.cpp */
@@ -22504,12 +22524,6 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
     return {SUCCESS, full_input_length, 0};
   }
-  char *end_of_safe_64byte_zone =
-      dst == nullptr
-          ? nullptr
-          : ((srclen + 3) / 4 * 3 >= 63 ? dst + (srclen + 3) / 4 * 3 - 63
-                                        : dst);
-
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
   const chartype *const srcend = src + srclen;
@@ -22518,31 +22532,54 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   static_assert(block_size >= 2, "block_size must be at least two");
   char buffer[block_size * 64];
   char *bufferptr = buffer;
+  // A wide block store writes 4 bytes past its 48. That is safe when the next
+  // store starts 48 bytes later. Pairs of clean blocks wide-store the first
+  // and end the second on byte 48. Anything shorter, or a block that is not
+  // clean, uses the exact store. The pair attempt is only worth it on a long
+  // input: a short one often fails the first block and then repeats that work.
+  if (srclen >= 512) {
+    const chartype *const srcend128 = src + srclen - 128;
+    while (bufferptr == buffer && src <= srcend128) {
+      block64 b0(src);
+      uint64_t e0 = 0;
+      const uint64_t m0 =
+          b0.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e0);
+      if ((!ignore_garbage && e0) || m0 != 0) {
+        break;
+      }
+      block64 b1(src + 64);
+      uint64_t e1 = 0;
+      const uint64_t m1 =
+          b1.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e1);
+      if ((!ignore_garbage && e1) || m1 != 0) {
+        break;
+      }
+      b0.base64_decode_block(dst);
+      b1.template base64_decode_block<true>(dst + 48);
+      src += 128;
+      dst += 96;
+    }
+  }
   if (srclen >= 64) {
-    const chartype *const srcend64 = src + srclen - 64;
+    const chartype *const srcend64 = srcinit + srclen - 64;
     while (src <= srcend64) {
       block64 b(src);
-      src += 64;
       uint64_t error = 0;
       const uint64_t badcharmask =
           b.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&error);
       if (!ignore_garbage && error) {
-        src -= 64;
         const size_t error_offset = trailing_zeroes(error);
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
       } else if (bufferptr != buffer) {
         b.copy_block(bufferptr);
         bufferptr += 64;
       } else {
-        if (dst >= end_of_safe_64byte_zone) {
-          b.base64_decode_block_safe(dst);
-        } else {
-          b.base64_decode_block(dst);
-        }
+        b.template base64_decode_block<true>(dst);
         dst += 48;
       }
       if (bufferptr >= (block_size - 1) * 64 + buffer) {
@@ -22550,11 +22587,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           base64_decode_block(dst, buffer + i * 64);
           dst += 48;
         }
-        if (dst >= end_of_safe_64byte_zone) {
-          base64_decode_block_safe(dst, buffer + (block_size - 2) * 64);
-        } else {
-          base64_decode_block(dst, buffer + (block_size - 2) * 64);
-        }
+        base64_decode_block<true>(dst, buffer + (block_size - 2) * 64);
         dst += 48;
         std::memcpy(buffer, buffer + (block_size - 1) * 64,
                     64); // 64 might be too much
@@ -22583,10 +22616,14 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
 
   for (; buffer_start + 64 <= bufferptr; buffer_start += 64) {
-    if (dst >= end_of_safe_64byte_zone) {
-      base64_decode_block_safe(dst, buffer_start);
-    } else {
+    // 8 payload bytes still in the buffer become 6 output bytes, which cover
+    // the 4-byte tail of a wide store. Fewer than that, and the tail can
+    // stick out past the real end.
+    const size_t after = size_t(bufferptr - (buffer_start + 64));
+    if (after >= 8) {
       base64_decode_block(dst, buffer_start);
+    } else {
+      base64_decode_block<true>(dst, buffer_start);
     }
     dst += 48;
   }
@@ -23917,21 +23954,24 @@ template <bool base64_url> __m128i lookup_pshufb_improved(const __m128i input) {
   //            63 -> 12
   __m128i result = _mm_subs_epu8(input, _mm_set1_epi8(51));
 
-  // distinguish between ranges 0..25 and 26..51:
+  // distinguish between ranges 0..25 and 26..51 by adding 1 (the
+  // comparison yields -1) to every value greater than 25:
   //         0 .. 25 -> remains 0
-  //        26 .. 51 -> becomes 13
-  const __m128i less = _mm_cmpgt_epi8(_mm_set1_epi8(26), input);
-  result = _mm_or_si128(result, _mm_and_si128(less, _mm_set1_epi8(13)));
+  //        26 .. 51 -> becomes 1
+  //        52 .. 61 -> 2 .. 11
+  //            62 -> 12
+  //            63 -> 13
+  result = _mm_sub_epi8(result, _mm_cmpgt_epi8(input, _mm_set1_epi8(25)));
 
   __m128i shift_LUT;
   if (base64_url) {
-    shift_LUT = _mm_setr_epi8('a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+    shift_LUT = _mm_setr_epi8('A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52,
                               '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-                              '0' - 52, '-' - 62, '_' - 63, 'A', 0, 0);
+                              '0' - 52, '0' - 52, '-' - 62, '_' - 63, 0, 0);
   } else {
-    shift_LUT = _mm_setr_epi8('a' - 26, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
+    shift_LUT = _mm_setr_epi8('A', 'a' - 26, '0' - 52, '0' - 52, '0' - 52,
                               '0' - 52, '0' - 52, '0' - 52, '0' - 52, '0' - 52,
-                              '0' - 52, '+' - 62, '/' - 63, 'A', 0, 0);
+                              '0' - 52, '0' - 52, '+' - 62, '/' - 63, 0, 0);
   }
 
   // read shift
@@ -24242,6 +24282,9 @@ static simdutf_really_inline void compress(__m128i data, uint16_t mask,
   _mm_storeu_si128(reinterpret_cast<__m128i *>(output), answer);
 }
 
+// exact: write 12 bytes. Otherwise write 16 and let the next lane cover the
+// extra 4. Only the last lane of a block passes true.
+template <bool exact = false>
 static simdutf_really_inline void base64_decode(char *out, __m128i str) {
   // credit: aqrit
 
@@ -24251,32 +24294,26 @@ static simdutf_really_inline void base64_decode(char *out, __m128i str) {
   const __m128i t0 = _mm_maddubs_epi16(str, _mm_set1_epi32(0x01400140));
   const __m128i t1 = _mm_madd_epi16(t0, _mm_set1_epi32(0x00011000));
   const __m128i t2 = _mm_shuffle_epi8(t1, pack_shuffle);
-  // Store the output:
-  // this writes 16 bytes, but we only need 12.
-  _mm_storeu_si128((__m128i *)out, t2);
+  if constexpr (exact) {
+    _mm_storel_epi64((__m128i *)out, t2);
+    const int32_t last = _mm_extract_epi32(t2, 2);
+    std::memcpy(out + 8, &last, sizeof(last));
+  } else {
+    // this writes 16 bytes, but we only need 12.
+    _mm_storeu_si128((__m128i *)out, t2);
+  }
 }
 
 // decode 64 bytes and output 48 bytes
+template <bool exact = false>
 static inline void base64_decode_block(char *out, const char *src) {
   base64_decode(out, _mm_loadu_si128(reinterpret_cast<const __m128i *>(src)));
   base64_decode(out + 12,
                 _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 16)));
   base64_decode(out + 24,
                 _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 32)));
-  base64_decode(out + 36,
-                _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 48)));
-}
-
-static inline void base64_decode_block_safe(char *out, const char *src) {
-  base64_decode(out, _mm_loadu_si128(reinterpret_cast<const __m128i *>(src)));
-  base64_decode(out + 12,
-                _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 16)));
-  base64_decode(out + 24,
-                _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 32)));
-  char buffer[16];
-  base64_decode(buffer,
-                _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 48)));
-  std::memcpy(out + 36, buffer, 12);
+  base64_decode<exact>(
+      out + 36, _mm_loadu_si128(reinterpret_cast<const __m128i *>(src + 48)));
 }
 
 // --- decoding - base64 class --------------------------------
@@ -24530,21 +24567,12 @@ private:
   }
 
 public:
+  template <bool exact = false>
   simdutf_really_inline void base64_decode_block(char *out) {
     base64_decode(out, chunks[0]);
     base64_decode(out + 12, chunks[1]);
     base64_decode(out + 24, chunks[2]);
-    base64_decode(out + 36, chunks[3]);
-  }
-
-public:
-  simdutf_really_inline void base64_decode_block_safe(char *out) {
-    base64_decode(out, chunks[0]);
-    base64_decode(out + 12, chunks[1]);
-    base64_decode(out + 24, chunks[2]);
-    char buffer[16];
-    base64_decode(buffer, chunks[3]);
-    std::memcpy(out + 36, buffer, 12);
+    base64_decode<exact>(out + 36, chunks[3]);
   }
 };
 /* end file src/westmere/sse_base64.cpp */
@@ -25496,12 +25524,6 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
     return {SUCCESS, full_input_length, 0};
   }
-  char *end_of_safe_64byte_zone =
-      dst == nullptr
-          ? nullptr
-          : ((srclen + 3) / 4 * 3 >= 63 ? dst + (srclen + 3) / 4 * 3 - 63
-                                        : dst);
-
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
   const chartype *const srcend = src + srclen;
@@ -25510,31 +25532,54 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   static_assert(block_size >= 2, "block_size must be at least two");
   char buffer[block_size * 64];
   char *bufferptr = buffer;
+  // A wide block store writes 4 bytes past its 48. That is safe when the next
+  // store starts 48 bytes later. Pairs of clean blocks wide-store the first
+  // and end the second on byte 48. Anything shorter, or a block that is not
+  // clean, uses the exact store. The pair attempt is only worth it on a long
+  // input: a short one often fails the first block and then repeats that work.
+  if (srclen >= 512) {
+    const chartype *const srcend128 = src + srclen - 128;
+    while (bufferptr == buffer && src <= srcend128) {
+      block64 b0(src);
+      uint64_t e0 = 0;
+      const uint64_t m0 =
+          b0.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e0);
+      if ((!ignore_garbage && e0) || m0 != 0) {
+        break;
+      }
+      block64 b1(src + 64);
+      uint64_t e1 = 0;
+      const uint64_t m1 =
+          b1.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&e1);
+      if ((!ignore_garbage && e1) || m1 != 0) {
+        break;
+      }
+      b0.base64_decode_block(dst);
+      b1.template base64_decode_block<true>(dst + 48);
+      src += 128;
+      dst += 96;
+    }
+  }
   if (srclen >= 64) {
-    const chartype *const srcend64 = src + srclen - 64;
+    const chartype *const srcend64 = srcinit + srclen - 64;
     while (src <= srcend64) {
       block64 b(src);
-      src += 64;
       uint64_t error = 0;
       const uint64_t badcharmask =
           b.to_base64_mask<base64_url, ignore_garbage, default_or_url>(&error);
       if (!ignore_garbage && error) {
-        src -= 64;
         const size_t error_offset = trailing_zeroes(error);
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
       } else if (bufferptr != buffer) {
         b.copy_block(bufferptr);
         bufferptr += 64;
       } else {
-        if (dst >= end_of_safe_64byte_zone) {
-          b.base64_decode_block_safe(dst);
-        } else {
-          b.base64_decode_block(dst);
-        }
+        b.template base64_decode_block<true>(dst);
         dst += 48;
       }
       if (bufferptr >= (block_size - 1) * 64 + buffer) {
@@ -25542,11 +25587,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           base64_decode_block(dst, buffer + i * 64);
           dst += 48;
         }
-        if (dst >= end_of_safe_64byte_zone) {
-          base64_decode_block_safe(dst, buffer + (block_size - 2) * 64);
-        } else {
-          base64_decode_block(dst, buffer + (block_size - 2) * 64);
-        }
+        base64_decode_block<true>(dst, buffer + (block_size - 2) * 64);
         dst += 48;
         std::memcpy(buffer, buffer + (block_size - 1) * 64,
                     64); // 64 might be too much
@@ -25575,10 +25616,14 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
 
   for (; buffer_start + 64 <= bufferptr; buffer_start += 64) {
-    if (dst >= end_of_safe_64byte_zone) {
-      base64_decode_block_safe(dst, buffer_start);
-    } else {
+    // 8 payload bytes still in the buffer become 6 output bytes, which cover
+    // the 4-byte tail of a wide store. Fewer than that, and the tail can
+    // stick out past the real end.
+    const size_t after = size_t(bufferptr - (buffer_start + 64));
+    if (after >= 8) {
       base64_decode_block(dst, buffer_start);
+    } else {
+      base64_decode_block<true>(dst, buffer_start);
     }
     dst += 48;
   }
@@ -26315,10 +26360,13 @@ size_t convert_masked_utf8_to_latin1(const char *input,
   __m128i mask = __lsx_vor_v(utf8_mask, ascii_mask);
 
   __m128i composed = __lsx_vbitsel_v(__lsx_vsrli_h(perm, 2), perm, mask);
-  // writing 8 bytes even though we only care about the first 6 bytes.
   __m128i latin1_packed = __lsx_vpickev_b(__lsx_vldi(0), composed);
 
-  __lsx_vst(latin1_packed, reinterpret_cast<uint8_t *>(latin1_output), 0);
+  // Only 6 bytes are meaningful; a direct 16-byte store could write past the
+  // end of an exactly-sized output buffer.
+  uint64_t buffer[2];
+  __lsx_vst(latin1_packed, reinterpret_cast<uint8_t *>(buffer), 0);
+  std::memcpy(latin1_output, buffer, 6);
   latin1_output += 6; // We wrote 6 bytes.
   return consumed;
 }
@@ -26353,9 +26401,70 @@ size_t convert_masked_utf8_to_latin1(const char *input,
  * https://www.codeproject.com/Articles/276993/Base-Encoding-on-a-GPU. (2013).
  */
 
-template <bool isbase64url>
-size_t encode_base64(char *dst, const char *src, size_t srclen,
-                     base64_options options) {
+// Translate 6-bit values (0..63) to the base64 alphabet using two 32-entry
+// (per 128-bit lane) shuffles and a select. xvshuf.b only uses the low five
+// bits of each index, so values 32..63 pick the right entry from
+// (tbl2, tbl3) without any adjustment.
+simdutf_really_inline __m256i lookup_base64(__m256i indices, __m256i tbl0,
+                                            __m256i tbl1, __m256i tbl2,
+                                            __m256i tbl3) {
+  const __m256i lo = __lasx_xvshuf_b(tbl1, tbl0, indices);
+  const __m256i hi = __lasx_xvshuf_b(tbl3, tbl2, indices);
+  const __m256i is_lo = __lasx_xvslei_bu(indices, 31);
+  return __lasx_xvbitsel_v(hi, lo, is_lo);
+}
+
+// Returns input with a line feed inserted at position K (0..15); the last
+// byte of the input is dropped and must be stored separately.
+simdutf_really_inline __m128i insert_line_feed16(__m128i input, size_t K) {
+  static const uint8_t shuffle_masks[16][16] = {
+      {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 15, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 15, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 15, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 15, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 15, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 15, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
+  input = __lsx_vinsgr2vr_b(input, '\n', 15);
+  const __m128i mask = __lsx_vld(shuffle_masks[K], 0);
+  return __lsx_vshuf_b(input, input, mask);
+}
+
+// Stores the 32 bytes of `data` at `out` with a line feed inserted at
+// position K (0..31), writing 33 bytes in total.
+simdutf_really_inline void store_with_line_feed32(uint8_t *out, __m256i data,
+                                                  size_t K) {
+  // out[1..32] receives data[0..31]; we then overwrite the 128-bit half
+  // that contains the line feed (and, when the line feed is in the upper
+  // half, restore the lower half).
+  __lasx_xvst(data, out, 1);
+  const __m128i lo = lasx_extracti128_lo(data);
+  if (K < 16) {
+    __lsx_vst(insert_line_feed16(lo, K), out, 0);
+  } else {
+    const __m128i hi = lasx_extracti128_hi(data);
+    __lsx_vst(lo, out, 0);
+    __lsx_vst(insert_line_feed16(hi, K - 16), out, 16);
+  }
+}
+
+template <bool isbase64url, bool use_lines>
+size_t encode_base64_impl(char *dst, const char *src, size_t srclen,
+                          base64_options options,
+                          size_t line_length = simdutf::default_line_length) {
+  size_t offset = 0;
+  if (line_length < 4) {
+    line_length = 4; // We do not support line_length less than 4
+  }
   // credit: Wojciech Muła
   // SSE (lookup: pshufb improved unrolled)
   const uint8_t *input = (const uint8_t *)src;
@@ -26365,12 +26474,19 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
           : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
   uint8_t *out = (uint8_t *)dst;
 
-  v32u8 shuf;
+  v32u8 shuf, shuf_overlap;
   __m256i v_fc0fc00, v_3f03f0, shift_r, shift_l, base64_tbl0, base64_tbl1,
       base64_tbl2, base64_tbl3;
   if (srclen >= 28) {
     shuf = v32u8{1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10,
                  1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10};
+    // Same as shuf, but for a 32-byte block loaded 4 bytes before the
+    // start of a 24-byte group: the low 128-bit lane then holds bytes
+    // 0..11 of the group at positions 4..15 and the high lane holds bytes
+    // 12..23 at positions 0..11.
+    shuf_overlap =
+        v32u8{5, 4, 6, 5, 8, 7, 9, 8, 11, 10, 12, 11, 14, 13, 15, 14,
+              1, 0, 2, 1, 4, 3, 5, 4, 7,  6,  8,  7,  10, 9,  11, 10};
 
     v_fc0fc00 = __lasx_xvreplgr2vr_w(uint32_t(0x0fc0fc00));
     v_3f03f0 = __lasx_xvreplgr2vr_w(uint32_t(0x003f03f0));
@@ -26383,32 +26499,26 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
   }
   size_t i = 0;
   for (; i + 100 <= srclen; i += 96) {
+    // The first 24-byte group cannot be loaded 4 bytes early (it might
+    // read before the start of the buffer), so it uses two 16-byte loads.
+    // The next three groups use a single overlapping 32-byte load each; the
+    // last one ends at input + i + 100 <= input + srclen.
     __m128i in0_lo =
         __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 0);
     __m128i in0_hi =
         __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 1);
-    __m128i in1_lo =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 2);
-    __m128i in1_hi =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 3);
-    __m128i in2_lo =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 4);
-    __m128i in2_hi =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 5);
-    __m128i in3_lo =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 6);
-    __m128i in3_hi =
-        __lsx_vld(reinterpret_cast<const __m128i *>(input + i), 4 * 3 * 7);
-
     __m256i in0 = lasx_set_q(in0_hi, in0_lo);
-    __m256i in1 = lasx_set_q(in1_hi, in1_lo);
-    __m256i in2 = lasx_set_q(in2_hi, in2_lo);
-    __m256i in3 = lasx_set_q(in3_hi, in3_lo);
+    __m256i in1 =
+        __lasx_xvld(reinterpret_cast<const __m256i *>(input + i), 24 - 4);
+    __m256i in2 =
+        __lasx_xvld(reinterpret_cast<const __m256i *>(input + i), 48 - 4);
+    __m256i in3 =
+        __lasx_xvld(reinterpret_cast<const __m256i *>(input + i), 72 - 4);
 
     in0 = __lasx_xvshuf_b(in0, in0, (__m256i)shuf);
-    in1 = __lasx_xvshuf_b(in1, in1, (__m256i)shuf);
-    in2 = __lasx_xvshuf_b(in2, in2, (__m256i)shuf);
-    in3 = __lasx_xvshuf_b(in3, in3, (__m256i)shuf);
+    in1 = __lasx_xvshuf_b(in1, in1, (__m256i)shuf_overlap);
+    in2 = __lasx_xvshuf_b(in2, in2, (__m256i)shuf_overlap);
+    in3 = __lasx_xvshuf_b(in3, in3, (__m256i)shuf_overlap);
 
     __m256i t0_0 = __lasx_xvand_v(in0, v_fc0fc00);
     __m256i t0_1 = __lasx_xvand_v(in1, v_fc0fc00);
@@ -26431,44 +26541,88 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
     __m256i t3_3 = __lasx_xvsll_h(t2_3, shift_l);
 
     __m256i input0 = __lasx_xvor_v(t1_0, t3_0);
-    __m256i input0_shuf0 = __lasx_xvshuf_b(base64_tbl1, base64_tbl0, input0);
-    __m256i input0_shuf1 = __lasx_xvshuf_b(
-        base64_tbl3, base64_tbl2, __lasx_xvsub_b(input0, __lasx_xvldi(32)));
-    __m256i input0_mask = __lasx_xvslei_bu(input0, 31);
-    __m256i input0_result =
-        __lasx_xvbitsel_v(input0_shuf1, input0_shuf0, input0_mask);
-    __lasx_xvst(input0_result, reinterpret_cast<__m256i *>(out), 0);
-    out += 32;
-
     __m256i input1 = __lasx_xvor_v(t1_1, t3_1);
-    __m256i input1_shuf0 = __lasx_xvshuf_b(base64_tbl1, base64_tbl0, input1);
-    __m256i input1_shuf1 = __lasx_xvshuf_b(
-        base64_tbl3, base64_tbl2, __lasx_xvsub_b(input1, __lasx_xvldi(32)));
-    __m256i input1_mask = __lasx_xvslei_bu(input1, 31);
-    __m256i input1_result =
-        __lasx_xvbitsel_v(input1_shuf1, input1_shuf0, input1_mask);
-    __lasx_xvst(input1_result, reinterpret_cast<__m256i *>(out), 0);
-    out += 32;
-
     __m256i input2 = __lasx_xvor_v(t1_2, t3_2);
-    __m256i input2_shuf0 = __lasx_xvshuf_b(base64_tbl1, base64_tbl0, input2);
-    __m256i input2_shuf1 = __lasx_xvshuf_b(
-        base64_tbl3, base64_tbl2, __lasx_xvsub_b(input2, __lasx_xvldi(32)));
-    __m256i input2_mask = __lasx_xvslei_bu(input2, 31);
-    __m256i input2_result =
-        __lasx_xvbitsel_v(input2_shuf1, input2_shuf0, input2_mask);
-    __lasx_xvst(input2_result, reinterpret_cast<__m256i *>(out), 0);
-    out += 32;
-
     __m256i input3 = __lasx_xvor_v(t1_3, t3_3);
-    __m256i input3_shuf0 = __lasx_xvshuf_b(base64_tbl1, base64_tbl0, input3);
-    __m256i input3_shuf1 = __lasx_xvshuf_b(
-        base64_tbl3, base64_tbl2, __lasx_xvsub_b(input3, __lasx_xvldi(32)));
-    __m256i input3_mask = __lasx_xvslei_bu(input3, 31);
-    __m256i input3_result =
-        __lasx_xvbitsel_v(input3_shuf1, input3_shuf0, input3_mask);
-    __lasx_xvst(input3_result, reinterpret_cast<__m256i *>(out), 0);
-    out += 32;
+
+    const __m256i r0 = lookup_base64(input0, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m256i r1 = lookup_base64(input1, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m256i r2 = lookup_base64(input2, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m256i r3 = lookup_base64(input3, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+
+    if (use_lines) {
+      if (line_length >= 32) { // fast path
+        if (offset + 32 > line_length) {
+          size_t location_end = line_length - offset;
+          store_with_line_feed32(out, r0, location_end);
+          offset = 32 - location_end;
+          out += 32 + 1;
+        } else {
+          __lasx_xvst(r0, out, 0);
+          offset += 32;
+          out += 32;
+        }
+        if (offset + 32 > line_length) {
+          size_t location_end = line_length - offset;
+          store_with_line_feed32(out, r1, location_end);
+          offset = 32 - location_end;
+          out += 32 + 1;
+        } else {
+          __lasx_xvst(r1, out, 0);
+          offset += 32;
+          out += 32;
+        }
+        if (offset + 32 > line_length) {
+          size_t location_end = line_length - offset;
+          store_with_line_feed32(out, r2, location_end);
+          offset = 32 - location_end;
+          out += 32 + 1;
+        } else {
+          __lasx_xvst(r2, out, 0);
+          offset += 32;
+          out += 32;
+        }
+        if (offset + 32 > line_length) {
+          size_t location_end = line_length - offset;
+          store_with_line_feed32(out, r3, location_end);
+          offset = 32 - location_end;
+          out += 32 + 1;
+        } else {
+          __lasx_xvst(r3, out, 0);
+          offset += 32;
+          out += 32;
+        }
+      } else { // slow path
+        // could be optimized
+        alignas(32) uint8_t buffer[128];
+        __lasx_xvst(r0, buffer, 0);
+        __lasx_xvst(r1, buffer, 32);
+        __lasx_xvst(r2, buffer, 64);
+        __lasx_xvst(r3, buffer, 96);
+        size_t out_pos = 0;
+        size_t local_offset = offset;
+        for (size_t j = 0; j < 128;) {
+          if (local_offset == line_length) {
+            out[out_pos++] = '\n';
+            local_offset = 0;
+          }
+          out[out_pos++] = buffer[j++];
+          local_offset++;
+        }
+        offset = local_offset;
+        out += out_pos;
+      }
+    } else {
+      __lasx_xvst(r0, out, 0);
+      __lasx_xvst(r1, out, 32);
+      __lasx_xvst(r2, out, 64);
+      __lasx_xvst(r3, out, 96);
+      out += 128;
+    }
   }
   for (; i + 28 <= srclen; i += 24) {
 
@@ -26508,18 +26662,53 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
     // res   = [00dddddd|00cccccc|00bbbbbb|00aaaaaa] = t1 | t3
     __m256i indices = __lasx_xvor_v(t1, t3);
 
-    __m256i indices_shuf0 = __lasx_xvshuf_b(base64_tbl1, base64_tbl0, indices);
-    __m256i indices_shuf1 = __lasx_xvshuf_b(
-        base64_tbl3, base64_tbl2, __lasx_xvsub_b(indices, __lasx_xvldi(32)));
-    __m256i indices_mask = __lasx_xvslei_bu(indices, 31);
-    __m256i indices_result =
-        __lasx_xvbitsel_v(indices_shuf1, indices_shuf0, indices_mask);
-    __lasx_xvst(indices_result, reinterpret_cast<__m256i *>(out), 0);
-    out += 32;
+    const __m256i result = lookup_base64(indices, base64_tbl0, base64_tbl1,
+                                         base64_tbl2, base64_tbl3);
+
+    if (use_lines) {
+      if (line_length >= 32) { // fast path
+        if (offset + 32 > line_length) {
+          size_t location_end = line_length - offset;
+          store_with_line_feed32(out, result, location_end);
+          offset = 32 - location_end;
+          out += 32 + 1;
+        } else {
+          __lasx_xvst(result, out, 0);
+          offset += 32;
+          out += 32;
+        }
+      } else { // slow path
+        // could be optimized
+        alignas(32) uint8_t buffer[32];
+        __lasx_xvst(result, buffer, 0);
+        size_t out_pos = 0;
+        size_t local_offset = offset;
+        for (size_t j = 0; j < 32;) {
+          if (local_offset == line_length) {
+            out[out_pos++] = '\n';
+            local_offset = 0;
+          }
+          out[out_pos++] = buffer[j++];
+          local_offset++;
+        }
+        offset = local_offset;
+        out += out_pos;
+      }
+    } else {
+      __lasx_xvst(result, out, 0);
+      out += 32;
+    }
   }
 
-  return i / 3 * 4 + scalar::base64::tail_encode_base64((char *)out, src + i,
-                                                        srclen - i, options);
+  return ((char *)out - (char *)dst) +
+         scalar::base64::tail_encode_base64_impl<use_lines>(
+             (char *)out, src + i, srclen - i, options, line_length, offset);
+}
+
+template <bool isbase64url>
+size_t encode_base64(char *dst, const char *src, size_t srclen,
+                     base64_options options) {
+  return encode_base64_impl<isbase64url, false>(dst, src, srclen, options);
 }
 
 static inline void compress(__m128i data, uint16_t mask, char *output) {
@@ -26786,6 +26975,8 @@ static inline void load_block(block64 *b, const char16_t *src) {
   b->chunks[1] = __lasx_xvpermi_d(__lasx_xvssrlni_bu_h(m4, m3, 0), 0b11011000);
 }
 
+// exact_tail stores 12 bytes from the high lane so a block ends at byte 48.
+template <bool exact_tail = false>
 static inline void base64_decode(char *out, __m256i str) {
   __m256i t0 = __lasx_xvor_v(
       __lasx_xvslli_w(str, 26),
@@ -26799,34 +26990,29 @@ static inline void base64_decode(char *out, __m256i str) {
   t3 = __lasx_xvshuf_b(t3, t3, (__m256i)pack_shuffle);
   t3 = __lasx_xvinsgr2vr_w(t3, 0, 7);
 
-  // Two 16-byte stores write 28 bytes: the 24 bytes of output followed by four
-  // zero bytes. Callers that cannot spare those four bytes must go through
-  // base64_decode_block_safe. The bulk loop can: it only takes this path while
-  // dst is below end_of_safe_64byte_zone, which leaves 63 bytes of room.
+  // The low store is 16 bytes for 12 of payload; the next store overlaps it.
+  // The high store is 16 bytes unless exact_tail, which writes 12.
   __lsx_vst(lasx_extracti128_lo(t3), out, 0);
-  __lsx_vst(lasx_extracti128_hi(t3), out, 12);
+  const __m128i hi = lasx_extracti128_hi(t3);
+  if constexpr (exact_tail) {
+    __lsx_vstelm_d(hi, out + 12, 0, 0);
+    __lsx_vstelm_w(hi, out + 20, 0, 2);
+  } else {
+    __lsx_vst(hi, out, 12);
+  }
 }
 // decode 64 bytes and output 48 bytes
+template <bool exact_tail = false>
 static inline void base64_decode_block(char *out, const char *src) {
   base64_decode(out, __lasx_xvld(reinterpret_cast<const __m256i *>(src), 0));
-  base64_decode(out + 24,
-                __lasx_xvld(reinterpret_cast<const __m256i *>(src), 32));
+  base64_decode<exact_tail>(
+      out + 24, __lasx_xvld(reinterpret_cast<const __m256i *>(src), 32));
 }
 
-static inline void base64_decode_block_safe(char *out, const char *src) {
-  alignas(32) char buffer[64];
-  base64_decode_block(buffer, src);
-  std::memcpy(out, buffer, 48);
-}
-
+template <bool exact_tail = false>
 static inline void base64_decode_block(char *out, block64 *b) {
   base64_decode(out, b->chunks[0]);
-  base64_decode(out + 24, b->chunks[1]);
-}
-static inline void base64_decode_block_safe(char *out, block64 *b) {
-  alignas(32) char buffer[64];
-  base64_decode_block(buffer, b);
-  std::memcpy(out, buffer, 48);
+  base64_decode<exact_tail>(out + 24, b->chunks[1]);
 }
 
 template <bool base64_url, bool ignore_garbage, bool default_or_url,
@@ -26850,9 +27036,6 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
     return {SUCCESS, full_input_length, 0};
   }
-  char *end_of_safe_64byte_zone =
-      (srclen + 3) / 4 * 3 >= 63 ? dst + (srclen + 3) / 4 * 3 - 63 : dst;
-
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
   const chartype *const srcend = src + srclen;
@@ -26861,8 +27044,46 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   static_assert(block_size >= 2, "block_size must be at least two");
   char buffer[block_size * 64];
   char *bufferptr = buffer;
+  // See src/generic/base64.h: wide stores inside a group of four clean
+  // blocks, exact tail on the fourth.
+  if (srclen >= 256) {
+    const chartype *const srcend256 = src + srclen - 256;
+    while (bufferptr == buffer && src <= srcend256) {
+      block64 b0, b1, b2, b3;
+      load_block(&b0, src);
+      bool e0 = false;
+      const uint64_t m0 = to_base64_mask<base64_url, default_or_url>(&b0, &e0);
+      if ((!ignore_garbage && e0) || m0 != 0) {
+        break;
+      }
+      load_block(&b1, src + 64);
+      bool e1 = false;
+      const uint64_t m1 = to_base64_mask<base64_url, default_or_url>(&b1, &e1);
+      if ((!ignore_garbage && e1) || m1 != 0) {
+        break;
+      }
+      load_block(&b2, src + 128);
+      bool e2 = false;
+      const uint64_t m2 = to_base64_mask<base64_url, default_or_url>(&b2, &e2);
+      if ((!ignore_garbage && e2) || m2 != 0) {
+        break;
+      }
+      load_block(&b3, src + 192);
+      bool e3 = false;
+      const uint64_t m3 = to_base64_mask<base64_url, default_or_url>(&b3, &e3);
+      if ((!ignore_garbage && e3) || m3 != 0) {
+        break;
+      }
+      base64_decode_block(dst, &b0);
+      base64_decode_block(dst + 48, &b1);
+      base64_decode_block(dst + 96, &b2);
+      base64_decode_block<true>(dst + 144, &b3);
+      src += 256;
+      dst += 192;
+    }
+  }
   if (srclen >= 64) {
-    const chartype *const srcend64 = src + srclen - 64;
+    const chartype *const srcend64 = srcinit + srclen - 64;
     while (src <= srcend64) {
       block64 b;
       load_block(&b, src);
@@ -26889,11 +27110,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         copy_block(&b, bufferptr);
         bufferptr += 64;
       } else {
-        if (dst >= end_of_safe_64byte_zone) {
-          base64_decode_block_safe(dst, &b);
-        } else {
-          base64_decode_block(dst, &b);
-        }
+        base64_decode_block<true>(dst, &b);
         dst += 48;
       }
       if (bufferptr >= (block_size - 1) * 64 + buffer) {
@@ -26901,11 +27118,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           base64_decode_block(dst, buffer + i * 64);
           dst += 48;
         }
-        if (dst >= end_of_safe_64byte_zone) {
-          base64_decode_block_safe(dst, buffer + (block_size - 2) * 64);
-        } else {
-          base64_decode_block(dst, buffer + (block_size - 2) * 64);
-        }
+        base64_decode_block<true>(dst, buffer + (block_size - 2) * 64);
         dst += 48;
         std::memcpy(buffer, buffer + (block_size - 1) * 64,
                     64); // 64 might be too much
@@ -26934,10 +27147,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
 
   for (; buffer_start + 64 <= bufferptr; buffer_start += 64) {
-    if (dst >= end_of_safe_64byte_zone) {
-      base64_decode_block_safe(dst, buffer_start);
-    } else {
+    if (buffer_start + 128 <= bufferptr) {
       base64_decode_block(dst, buffer_start);
+    } else {
+      base64_decode_block<true>(dst, buffer_start);
     }
     dst += 48;
   }
@@ -28368,8 +28581,13 @@ size_t implementation::binary_to_base64(const char *input, size_t length,
 size_t implementation::binary_to_base64_with_lines(
     const char *input, size_t length, char *output, size_t line_length,
     base64_options options) const noexcept {
-  return scalar::base64::tail_encode_base64_impl<true>(output, input, length,
-                                                       options, line_length);
+  if (options & base64_url) {
+    return encode_base64_impl<true, true>(output, input, length, options,
+                                          line_length);
+  } else {
+    return encode_base64_impl<false, true>(output, input, length, options,
+                                           line_length);
+  }
 }
 
 const char *implementation::find(const char *start, const char *end,
@@ -28621,9 +28839,60 @@ size_t convert_masked_utf8_to_latin1(const char *input,
  * https://www.codeproject.com/Articles/276993/Base-Encoding-on-a-GPU. (2013).
  */
 
-template <bool isbase64url>
-size_t encode_base64(char *dst, const char *src, size_t srclen,
-                     base64_options options) {
+// Translate 6-bit values (0..63) to the base64 alphabet using two 32-entry
+// shuffles and a select. vshuf.b only uses the low five bits of each index,
+// so values 32..63 pick the right entry from (tbl2, tbl3) without any
+// adjustment.
+simdutf_really_inline __m128i lookup_base64(__m128i indices, __m128i tbl0,
+                                            __m128i tbl1, __m128i tbl2,
+                                            __m128i tbl3) {
+  const __m128i lo = __lsx_vshuf_b(tbl1, tbl0, indices);
+  const __m128i hi = __lsx_vshuf_b(tbl3, tbl2, indices);
+  const __m128i is_lo = __lsx_vslei_bu(indices, 31);
+  return __lsx_vbitsel_v(hi, lo, is_lo);
+}
+
+// Returns input with a line feed inserted at position K (0..15); the last
+// byte of the input is dropped and must be stored separately.
+simdutf_really_inline __m128i insert_line_feed16(__m128i input, size_t K) {
+  static const uint8_t shuffle_masks[16][16] = {
+      {15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 15, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 15, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 15, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 15, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 15, 6, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 15, 7, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 15, 8, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 15, 9, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 10, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 11, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 12, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 13, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 14},
+      {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
+  input = __lsx_vinsgr2vr_b(input, '\n', 15);
+  const __m128i mask = __lsx_vld(shuffle_masks[K], 0);
+  return __lsx_vshuf_b(input, input, mask);
+}
+
+// Stores the 16 bytes of `data` at `out` with a line feed inserted at
+// position K (0..15), writing 17 bytes in total.
+simdutf_really_inline void store_with_line_feed16(uint8_t *out, __m128i data,
+                                                  size_t K) {
+  __lsx_vst(insert_line_feed16(data, K), out, 0);
+  out[16] = uint8_t(__lsx_vpickve2gr_bu(data, 15));
+}
+
+template <bool isbase64url, bool use_lines>
+size_t encode_base64_impl(char *dst, const char *src, size_t srclen,
+                          base64_options options,
+                          size_t line_length = simdutf::default_line_length) {
+  size_t offset = 0;
+  if (line_length < 4) {
+    line_length = 4; // We do not support line_length less than 4
+  }
   // credit: Wojciech Muła
   // SSE (lookup: pshufb improved unrolled)
   const uint8_t *input = (const uint8_t *)src;
@@ -28685,44 +28954,89 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
     __m128i t3_3 = __lsx_vsll_h(t2_3, shift_l);
 
     __m128i input0 = __lsx_vor_v(t1_0, t3_0);
-    __m128i input0_shuf0 = __lsx_vshuf_b(base64_tbl1, base64_tbl0, input0);
-    __m128i input0_shuf1 = __lsx_vshuf_b(base64_tbl3, base64_tbl2,
-                                         __lsx_vsub_b(input0, __lsx_vldi(32)));
-    __m128i input0_mask = __lsx_vslei_bu(input0, 31);
-    __m128i input0_result =
-        __lsx_vbitsel_v(input0_shuf1, input0_shuf0, input0_mask);
-    __lsx_vst(input0_result, reinterpret_cast<__m128i *>(out), 0);
-    out += 16;
-
     __m128i input1 = __lsx_vor_v(t1_1, t3_1);
-    __m128i input1_shuf0 = __lsx_vshuf_b(base64_tbl1, base64_tbl0, input1);
-    __m128i input1_shuf1 = __lsx_vshuf_b(base64_tbl3, base64_tbl2,
-                                         __lsx_vsub_b(input1, __lsx_vldi(32)));
-    __m128i input1_mask = __lsx_vslei_bu(input1, 31);
-    __m128i input1_result =
-        __lsx_vbitsel_v(input1_shuf1, input1_shuf0, input1_mask);
-    __lsx_vst(input1_result, reinterpret_cast<__m128i *>(out), 0);
-    out += 16;
-
     __m128i input2 = __lsx_vor_v(t1_2, t3_2);
-    __m128i input2_shuf0 = __lsx_vshuf_b(base64_tbl1, base64_tbl0, input2);
-    __m128i input2_shuf1 = __lsx_vshuf_b(base64_tbl3, base64_tbl2,
-                                         __lsx_vsub_b(input2, __lsx_vldi(32)));
-    __m128i input2_mask = __lsx_vslei_bu(input2, 31);
-    __m128i input2_result =
-        __lsx_vbitsel_v(input2_shuf1, input2_shuf0, input2_mask);
-    __lsx_vst(input2_result, reinterpret_cast<__m128i *>(out), 0);
-    out += 16;
-
     __m128i input3 = __lsx_vor_v(t1_3, t3_3);
-    __m128i input3_shuf0 = __lsx_vshuf_b(base64_tbl1, base64_tbl0, input3);
-    __m128i input3_shuf1 = __lsx_vshuf_b(base64_tbl3, base64_tbl2,
-                                         __lsx_vsub_b(input3, __lsx_vldi(32)));
-    __m128i input3_mask = __lsx_vslei_bu(input3, 31);
-    __m128i input3_result =
-        __lsx_vbitsel_v(input3_shuf1, input3_shuf0, input3_mask);
-    __lsx_vst(input3_result, reinterpret_cast<__m128i *>(out), 0);
-    out += 16;
+
+    const __m128i t0 = lookup_base64(input0, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m128i t1 = lookup_base64(input1, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m128i t2 = lookup_base64(input2, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+    const __m128i t3 = lookup_base64(input3, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
+
+    if (use_lines) {
+      if (line_length >= 64) { // fast path
+        if (offset + 64 > line_length) {
+          // exactly one line feed falls within these 64 bytes
+          size_t location_end = line_length - offset;
+          size_t to_move = 64 - location_end;
+          if (location_end < 16) {
+            store_with_line_feed16(out, t0, location_end);
+            out += 17;
+          } else {
+            __lsx_vst(t0, out, 0);
+            out += 16;
+          }
+          if (location_end >= 16 && location_end < 32) {
+            store_with_line_feed16(out, t1, location_end - 16);
+            out += 17;
+          } else {
+            __lsx_vst(t1, out, 0);
+            out += 16;
+          }
+          if (location_end >= 32 && location_end < 48) {
+            store_with_line_feed16(out, t2, location_end - 32);
+            out += 17;
+          } else {
+            __lsx_vst(t2, out, 0);
+            out += 16;
+          }
+          if (location_end >= 48) {
+            store_with_line_feed16(out, t3, location_end - 48);
+            out += 17;
+          } else {
+            __lsx_vst(t3, out, 0);
+            out += 16;
+          }
+          offset = to_move;
+        } else {
+          __lsx_vst(t0, out, 0);
+          __lsx_vst(t1, out, 16);
+          __lsx_vst(t2, out, 32);
+          __lsx_vst(t3, out, 48);
+          offset += 64;
+          out += 64;
+        }
+      } else { // slow path
+        // could be optimized
+        alignas(64) uint8_t buffer[64];
+        __lsx_vst(t0, buffer, 0);
+        __lsx_vst(t1, buffer, 16);
+        __lsx_vst(t2, buffer, 32);
+        __lsx_vst(t3, buffer, 48);
+        size_t out_pos = 0;
+        size_t local_offset = offset;
+        for (size_t j = 0; j < 64;) {
+          if (local_offset == line_length) {
+            out[out_pos++] = '\n';
+            local_offset = 0;
+          }
+          out[out_pos++] = buffer[j++];
+          local_offset++;
+        }
+        offset = local_offset;
+        out += out_pos;
+      }
+    } else {
+      __lsx_vst(t0, out, 0);
+      __lsx_vst(t1, out, 16);
+      __lsx_vst(t2, out, 32);
+      __lsx_vst(t3, out, 48);
+      out += 64;
+    }
   }
   for (; i + 16 <= srclen; i += 12) {
 
@@ -28758,19 +29072,54 @@ size_t encode_base64(char *dst, const char *src, size_t srclen,
     // res   = [00dddddd|00cccccc|00bbbbbb|00aaaaaa] = t1 | t3
     __m128i indices = __lsx_vor_v(t1, t3);
 
-    __m128i indices_shuf0 = __lsx_vshuf_b(base64_tbl1, base64_tbl0, indices);
-    __m128i indices_shuf1 = __lsx_vshuf_b(
-        base64_tbl3, base64_tbl2, __lsx_vsub_b(indices, __lsx_vldi(32)));
-    __m128i indices_mask = __lsx_vslei_bu(indices, 31);
-    __m128i indices_result =
-        __lsx_vbitsel_v(indices_shuf1, indices_shuf0, indices_mask);
+    const __m128i T0 = lookup_base64(indices, base64_tbl0, base64_tbl1,
+                                     base64_tbl2, base64_tbl3);
 
-    __lsx_vst(indices_result, reinterpret_cast<__m128i *>(out), 0);
-    out += 16;
+    if (use_lines) {
+      if (line_length >= 16) { // fast path
+        if (offset + 16 > line_length) {
+          size_t location_end = line_length - offset;
+          size_t to_move = 16 - location_end;
+          store_with_line_feed16(out, T0, location_end);
+          offset = to_move;
+          out += 16 + 1;
+        } else {
+          __lsx_vst(T0, out, 0);
+          offset += 16;
+          out += 16;
+        }
+      } else { // slow path
+        // could be optimized
+        alignas(16) uint8_t buffer[16];
+        __lsx_vst(T0, buffer, 0);
+        size_t out_pos = 0;
+        size_t local_offset = offset;
+        for (size_t j = 0; j < 16;) {
+          if (local_offset == line_length) {
+            out[out_pos++] = '\n';
+            local_offset = 0;
+          }
+          out[out_pos++] = buffer[j++];
+          local_offset++;
+        }
+        offset = local_offset;
+        out += out_pos;
+      }
+    } else {
+      __lsx_vst(T0, out, 0);
+      out += 16;
+    }
   }
 
-  return i / 3 * 4 + scalar::base64::tail_encode_base64((char *)out, src + i,
-                                                        srclen - i, options);
+  return ((char *)out - (char *)dst) +
+         scalar::base64::tail_encode_base64_impl<use_lines>(
+             (char *)out, src + i, srclen - i, options, line_length, offset);
+}
+
+template <bool isbase64url>
+size_t encode_base64(char *dst, const char *src, size_t srclen,
+                     base64_options options) {
+  return encode_base64_impl<isbase64url, false>(dst, src, srclen, options);
 }
 
 static inline void compress(__m128i data, uint16_t mask, char *output) {
@@ -30497,8 +30846,13 @@ size_t implementation::binary_to_base64(const char *input, size_t length,
 size_t implementation::binary_to_base64_with_lines(
     const char *input, size_t length, char *output, size_t line_length,
     base64_options options) const noexcept {
-  return scalar::base64::tail_encode_base64_impl<true>(output, input, length,
-                                                       options, line_length);
+  if (options & base64_url) {
+    return encode_base64_impl<true, true>(output, input, length, options,
+                                          line_length);
+  } else {
+    return encode_base64_impl<false, true>(output, input, length, options,
+                                           line_length);
+  }
 }
 
 const char *implementation::find(const char *start, const char *end,
@@ -30673,6 +31027,8 @@ size_t simdutf_convert_latin1_to_utf8(const char *input, size_t length,
                                       char *output);
 size_t simdutf_convert_latin1_to_utf8_safe(const char *input, size_t length,
                                            char *output, size_t utf8_len);
+simdutf_full_result simdutf_convert_latin1_to_utf8_safe_with_details(
+    const char *input, size_t length, char *output, size_t utf8_len);
 size_t simdutf_convert_latin1_to_utf16le(const char *input, size_t length,
                                          char16_t *output);
 size_t simdutf_convert_latin1_to_utf16be(const char *input, size_t length,
@@ -30728,6 +31084,8 @@ size_t simdutf_convert_utf16be_to_utf8(const char16_t *input, size_t length,
                                        char *output);
 size_t simdutf_convert_utf16_to_utf8_safe(const char16_t *input, size_t length,
                                           char *output, size_t utf8_len);
+simdutf_full_result simdutf_convert_utf16_to_utf8_safe_with_details(
+    const char16_t *input, size_t length, char *output, size_t utf8_len);
 size_t simdutf_convert_utf16_to_latin1(const char16_t *input, size_t length,
                                        char *output);
 size_t simdutf_convert_utf16le_to_latin1(const char16_t *input, size_t length,
@@ -30761,6 +31119,8 @@ simdutf_convert_utf16be_to_utf8_with_errors(const char16_t *input,
 size_t simdutf_convert_utf16_to_utf8_with_replacement(const char16_t *input,
                                                       size_t length,
                                                       char *output);
+simdutf_full_result simdutf_convert_utf16_to_utf8_with_replacement_safe(
+    const char16_t *input, size_t length, char *output, size_t utf8_len);
 size_t simdutf_convert_utf16le_to_utf8_with_replacement(const char16_t *input,
                                                         size_t length,
                                                         char *output);
@@ -30914,6 +31274,14 @@ static simdutf_result to_c_result(const simdutf::result &r) {
   simdutf_result out;
   out.error = static_cast<simdutf_error_code>(r.error);
   out.count = r.count;
+  return out;
+}
+
+static simdutf_full_result to_c_full_result(const simdutf::full_result &r) {
+  simdutf_full_result out;
+  out.error = static_cast<simdutf_error_code>(r.error);
+  out.input_count = r.input_count;
+  out.output_count = r.output_count;
   return out;
 }
 
