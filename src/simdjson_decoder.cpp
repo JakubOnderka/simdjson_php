@@ -28,8 +28,6 @@ extern "C" {
 #define SIMDJSON_PHP_CHECK_ERROR(EXPR) { auto _err = (EXPR).error(); if (UNEXPECTED(_err)) { return _err; } }
 #define SIMDJSON_PHP_VALUE(EXPR) ({ auto _res = EXPR; auto _err = _res.error(); if (UNEXPECTED(_err)) { return _err; } _res.value_unsafe(); })
 
-#define SIMDJSON_DEPTH_CHECK_THRESHOLD 100000
-
 PHP_SIMDJSON_API const char* php_simdjson_error_msg(simdjson_php_error_code error) {
     switch (error) {
         case SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE:
@@ -185,30 +183,7 @@ static zend_always_inline zend_string* simdjson_string_init(const char* buf, siz
 static simdjson::error_code
 build_parsed_json_cust(simdjson_php_parser* parser, simdjson::dom::element &doc, const char *buf, size_t len, bool realloc_if_needed,
                        size_t depth = simdjson::DEFAULT_MAX_DEPTH) {
-    if (UNEXPECTED(depth > SIMDJSON_DEPTH_CHECK_THRESHOLD) && depth > len && depth > parser->parser.max_depth()) {
-        /*
-         * Choose the depth in a way that both avoids frequent reallocations
-         * and avoids excessive amounts of wasted memory beyond multiples of the largest string ever decoded.
-         *
-         * If the depth is already sufficient to parse a string of length `len`,
-         * then use the parser's previous depth.
-         *
-         * Precondition: depth > len
-         * Postcondition: depth <= original_depth && depth > len
-         */
-        if (len < SIMDJSON_DEPTH_CHECK_THRESHOLD) {
-            depth = SIMDJSON_DEPTH_CHECK_THRESHOLD;
-        } else if (depth > len * 2) {
-            // In callers, simdjson_validate_depth ensures depth <= SIMDJSON_MAX_DEPTH (which is <= SIZE_MAX/8),
-            // so len * 2 is even smaller than the previous depth and won't overflow.
-            depth = len * 2;
-        }
-    }
-
-    if (depth != parser->parser.max_depth()) {
-        SIMDJSON_PHP_TRY(parser->parser.allocate(len, depth));
-    }
-
+    SIMDJSON_PHP_TRY(parser->parser.allocate(parser->parser.capacity(), depth));
     SIMDJSON_PHP_TRY(parser->parser.parse(buf, len, realloc_if_needed).get(doc));
 
     return simdjson::SUCCESS;
@@ -699,7 +674,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
     simdjson::ondemand::document doc;
     simdjson::ondemand::value value;
 
-    SIMDJSON_PHP_TRY(parser->ondemand_parser.allocate(ZSTR_LEN(json), depth));
+    SIMDJSON_PHP_TRY(parser->ondemand_parser.allocate(parser->ondemand_parser.capacity(), depth));
     SIMDJSON_PHP_TRY(parser->ondemand_parser.iterate(simdjson_padded_string_view(json, jsonbuffer)).get(doc));
 
     // In case document is just scalar type, directly return error code
