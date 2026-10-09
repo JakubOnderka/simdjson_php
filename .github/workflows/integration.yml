@@ -61,6 +61,34 @@ jobs:
           NO_INTERACTION: "true"
         run: make test TESTS="-m --show-diff -j$(nproc)"
 
+  ubuntu-no-simd-encoder:
+    runs-on: ubuntu-latest
+    name: Encoder without SIMD
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: json
+          tools: phpize, php-config
+
+      - name: Build extension with generic encoder
+        run: |
+          phpize
+          CXXFLAGS="-DSIMDJSON_NO_SIMD_ENCODER" ./configure
+          make -j$(nproc)
+
+      - name: Check that generic encoder is used
+        run: php -dextension=$PWD/modules/simdjson.so --ri simdjson | grep -i "Generic"
+
+      - name: Run tests
+        env:
+          NO_INTERACTION: "true"
+        run: make test TESTS="--show-diff -j2 -q"
+
   ubuntu:
     strategy:
       fail-fast: false

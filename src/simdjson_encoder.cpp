@@ -34,11 +34,22 @@ extern "C" {
 
 #include "php_simdjson.h"
 #include "simdjson_encoder.h"
+
+// Define SIMDJSON_NO_SIMD_ENCODER (for example CXXFLAGS=-DSIMDJSON_NO_SIMD_ENCODER) to build the generic encoder
+#ifndef SIMDJSON_NO_SIMD_ENCODER
+#  if defined(__SSE2__)
+#    define SIMDJSON_ENCODER_SSE2 1
+#  endif
+#  if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+#    define SIMDJSON_ENCODER_VECTOR8 1
+#  endif
+#endif
+
 #include "simdjson_integer_writer.h"
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+#ifdef SIMDJSON_ENCODER_VECTOR8
 #include "simdjson_vector8.h"
 #endif
-#if defined(__SSE2__)
+#ifdef SIMDJSON_ENCODER_SSE2
 #include "simdjson_avx2.h"
 #endif
 #include "simdjson.h"
@@ -123,7 +134,7 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
         } \
     } while (0); \
 
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+#ifdef SIMDJSON_ENCODER_VECTOR8
 template<typename T>
 static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const char *s, size_t len) {
     T chunk;
@@ -196,7 +207,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 }
 #endif
 
-#ifdef __SSE2__
+#ifdef SIMDJSON_ENCODER_SSE2
 static zend_always_inline bool simdjson_avx2_supported() {
 #ifdef __AVX2__
     return true;
@@ -390,14 +401,14 @@ static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simd
 		}
     }
 
-#ifdef __SSE2__
+#ifdef SIMDJSON_ENCODER_SSE2
    if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
      	simdjson_escape_long_string_avx2(buf, s, len);
         return SUCCESS;
    }
 #endif
 
-#if defined(__SSE2__) || defined(__aarch64__) || defined(_M_ARM64)
+#ifdef SIMDJSON_ENCODER_VECTOR8
     if (len >= sizeof(simdjson_vector8)) {
     	simdjson_escape_long_string<simdjson_vector8>(buf, s, len);
         return SUCCESS;
@@ -1030,13 +1041,13 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
 }
 
 const char* simdjson_encode_implementation() {
-#ifdef __SSE2__
+#ifdef SIMDJSON_ENCODER_SSE2
       if (simdjson_avx2_supported()) {
           return "AVX2";
       } else {
           return "SSE2";
       }
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif defined(SIMDJSON_ENCODER_VECTOR8)
       return "ARM64 NEON";
 #else
       return "Generic";
