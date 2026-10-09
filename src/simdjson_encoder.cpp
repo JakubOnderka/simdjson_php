@@ -170,6 +170,17 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
     // Ensure that buf contains enough space that we can call unsafe methods
     SIDMJSON_ZSTR_ALLOC(sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH + 1);
 
+    if (s < start + len) {
+        // Check the rest by overlapping chunk. If there is nothing to escape in the whole chunk, copy rest at once
+        chunk.load((const uint8_t *) start + len - sizeof(chunk));
+        if (EXPECTED(!chunk.needs_escaping())) {
+            size_t rest = start + len - s;
+            memcpy(output, s, rest);
+            output += rest;
+            s += rest;
+        }
+    }
+
     // Finish last chars of string
     while (s < start + len) {
 		char c = *s++;
@@ -199,8 +210,34 @@ TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, 
 }
 #endif
 
+// Check if any byte in 8 bytes word needs to be escaped (is less than 0x20, '"' or '\\')
+static zend_always_inline bool simdjson_word_needs_escaping(uint64_t w) {
+    const uint64_t ones = 0x0101010101010101ULL;
+    const uint64_t high = 0x8080808080808080ULL;
+    uint64_t quote = w ^ (ones * '"');
+    uint64_t backslash = w ^ (ones * '\\');
+    uint64_t found = ((w - ones * 0x20) & ~w) | ((quote - ones) & ~quote) | ((backslash - ones) & ~backslash);
+    return (found & high) != 0;
+}
+
 static zend_always_inline void simdjson_escape_short_string(smart_str *buf, const char *s, size_t len) {
     const char *end = s + len;
+
+    if (len >= 8) {
+        // Two possibly overlapping 8 bytes loads cover whole string
+        uint64_t first, last;
+        memcpy(&first, s, 8);
+        memcpy(&last, end - 8, 8);
+        if (EXPECTED(!simdjson_word_needs_escaping(first) && !simdjson_word_needs_escaping(last))) {
+            char *output = simdjson_smart_str_alloc(buf, len + 2);
+            *output++ = '"';
+            memcpy(output, &first, 8);
+            memcpy(output + len - 8, &last, 8);
+            output[len] = '"';
+            ZSTR_LEN(buf->s) += len + 2;
+            return;
+        }
+    }
 
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
     char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
