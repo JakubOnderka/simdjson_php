@@ -71,6 +71,11 @@ get_key_with_optional_prefix_ondemand(simdjson::ondemand::document &doc, std::st
     return doc.at_pointer(std_pointer);
 }
 
+/** Integers that do not fit into 64 bits are valid JSON, they are decoded to double */
+static zend_always_inline simdjson::error_code simdjson_number_error(simdjson::error_code error) {
+    return error == simdjson::BIGINT_ERROR ? simdjson::SUCCESS : error;
+}
+
 // Initialize stdClass object and return pointer to properties HashTable
 static zend_always_inline HashTable* simdjson_init_object(zval *zv, uint32_t size) {
 #if PHP_VERSION_ID >= 80300
@@ -449,11 +454,19 @@ static zend_always_inline void simdjson_set_zval_to_int64(zval *zv, int64_t valu
     ZVAL_LONG(zv, value);
 }
 
+/** Integers that do not fit into 64 bits are converted to double, the same way as json_decode() does */
+static zend_always_inline void simdjson_set_zval_to_bigint(zval *zv, std::string_view digits) {
+    ZVAL_DOUBLE(zv, simdjson::internal::from_chars(digits.data(), digits.data() + digits.size()));
+}
+
 static void simdjson_create_array(simdjson_php_parser *parser, simdjson::dom::element element, zval *return_value) {
     switch (element.type()) {
         //ASCII sort
         case simdjson::dom::element_type::STRING :
             simdjson_set_zval_to_string(return_value, element.get_c_str().value_unsafe(), element.get_string_length().value_unsafe());
+            break;
+        case simdjson::dom::element_type::BIGINT :
+            simdjson_set_zval_to_bigint(return_value, element.get_bigint().value_unsafe());
             break;
         case simdjson::dom::element_type::INT64 :
             simdjson_set_zval_to_int64(return_value, element.get_int64().value_unsafe());
@@ -534,6 +547,9 @@ static simdjson_php_error_code simdjson_create_object(simdjson_php_parser *parse
         case simdjson::dom::element_type::STRING :
             simdjson_set_zval_to_string(return_value, element.get_c_str().value_unsafe(), element.get_string_length().value_unsafe());
             break;
+        case simdjson::dom::element_type::BIGINT :
+            simdjson_set_zval_to_bigint(return_value, element.get_bigint().value_unsafe());
+            break;
         case simdjson::dom::element_type::INT64 :
             simdjson_set_zval_to_int64(return_value, element.get_int64().value_unsafe());
             break;
@@ -606,7 +622,9 @@ static simdjson_php_error_code simdjson_create_object(simdjson_php_parser *parse
 /* }}} */
 
 PHP_SIMDJSON_API simdjson_php_parser* php_simdjson_create_parser(void) /* {{{ */ {
-    return new simdjson_php_parser();
+    auto parser = new simdjson_php_parser();
+    parser->parser.number_as_string(true);
+    return parser;
 }
 
 PHP_SIMDJSON_API void php_simdjson_free_parser(simdjson_php_parser* parser) /* {{{ */ {
@@ -649,7 +667,7 @@ static simdjson_php_error_code simdjson_ondemand_validate(simdjson::ondemand::va
             }
             break;
         case simdjson::ondemand::json_type::number:
-            return element.get_number().error();
+            return simdjson_number_error(element.get_number().error());
         case simdjson::ondemand::json_type::string:
             return element.get_raw_json_string().error();
         case simdjson::ondemand::json_type::boolean:
@@ -705,7 +723,7 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
     // In case document is just scalar type, directly return error code
     switch (SIMDJSON_PHP_VALUE(doc.type())) {
         case simdjson::ondemand::json_type::number:
-            return doc.get_number().error();
+            return simdjson_number_error(doc.get_number().error());
         case simdjson::ondemand::json_type::string:
             return doc.get_raw_json_string().error();
         case simdjson::ondemand::json_type::boolean:

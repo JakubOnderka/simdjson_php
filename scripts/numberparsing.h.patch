@@ -1,0 +1,51 @@
+--- a/include/simdjson/generic/numberparsing.h
++++ b/include/simdjson/generic/numberparsing.h
+@@ -534,32 +534,14 @@
+ // one digit.
+ static bool parse_float_fallback(const uint8_t *ptr, double *outDouble) {
+   *outDouble = simdjson::internal::from_chars(reinterpret_cast<const char *>(ptr));
+-  // We do not accept infinite values.
+-
+-  // Detecting finite values in a portable manner is ridiculously hard, ideally
+-  // we would want to do:
+-  // return !std::isfinite(*outDouble);
+-  // but that mysteriously fails under legacy/old libc++ libraries, see
+-  // https://github.com/simdjson/simdjson/issues/1286
+-  //
+-  // Therefore, fall back to this solution (the extra parens are there
+-  // to handle that max may be a macro on windows).
+-  return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
++  // Patched: infinite values are accepted, the same way as PHP json_decode() does.
++  return true;
+ }
+ 
+ static bool parse_float_fallback(const uint8_t *ptr, const uint8_t *end_ptr, double *outDouble) {
+   *outDouble = simdjson::internal::from_chars(reinterpret_cast<const char *>(ptr), reinterpret_cast<const char *>(end_ptr));
+-  // We do not accept infinite values.
+-
+-  // Detecting finite values in a portable manner is ridiculously hard, ideally
+-  // we would want to do:
+-  // return !std::isfinite(*outDouble);
+-  // but that mysteriously fails under legacy/old libc++ libraries, see
+-  // https://github.com/simdjson/simdjson/issues/1286
+-  //
+-  // Therefore, fall back to this solution (the extra parens are there
+-  // to handle that max may be a macro on windows).
+-  return !(*outDouble > (std::numeric_limits<double>::max)() || *outDouble < std::numeric_limits<double>::lowest());
++  // Patched: infinite values are accepted, the same way as PHP json_decode() does.
++  return true;
+ }
+ 
+ // Same as parse_float_fallback, but for binary32 (float) values. Going through
+@@ -832,8 +814,9 @@
+       WRITE_DOUBLE(negative ? -0.0 : 0.0, src, writer);
+       return SUCCESS;
+     } else { // (exponent > largest_power) and (i != 0)
+-      // We have, for sure, an infinite value and simdjson refuses to parse infinite values.
+-      return INVALID_NUMBER(src);
++      // We have, for sure, an infinite value; return it the same way as PHP json_decode() does.
++      WRITE_DOUBLE(negative ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity(), src, writer);
++      return SUCCESS;
+     }
+   }
+   double d;
