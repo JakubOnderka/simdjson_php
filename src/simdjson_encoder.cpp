@@ -235,15 +235,28 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
     const char *end = s + len;
 
     if (len >= 8) {
-        // Two possibly overlapping 8 bytes loads cover whole string
-        uint64_t first, last;
-        memcpy(&first, s, 8);
+        // Check whole string by 8 bytes words, the last word overlaps the previous one when len is not multiple of 8
+        const char *p = s;
+        bool clean = true;
+        for (; p + 8 < end; p += 8) {
+            uint64_t word;
+            memcpy(&word, p, 8);
+            if (UNEXPECTED(simdjson_word_needs_escaping(word))) {
+                clean = false;
+                break;
+            }
+        }
+        uint64_t last;
         memcpy(&last, end - 8, 8);
-        if (EXPECTED(!simdjson_word_needs_escaping(first) && !simdjson_word_needs_escaping(last))) {
+        if (EXPECTED(clean && !simdjson_word_needs_escaping(last))) {
             char *output = simdjson_smart_str_alloc(buf, len + 2);
             *output++ = '"';
-            memcpy(output, &first, 8);
-            memcpy(output + len - 8, &last, 8);
+            if (EXPECTED(len <= 16)) {
+                memcpy(output, s, 8);
+                memcpy(output + len - 8, end - 8, 8);
+            } else {
+                memcpy(output, s, len);
+            }
             output[len] = '"';
             ZSTR_LEN(buf->s) += len + 2;
             return;
