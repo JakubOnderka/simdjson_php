@@ -23,6 +23,7 @@ extern "C" {
 #include "ext/standard/info.h"
 #include "ext/spl/spl_exceptions.h"
 #include "ext/json/php_json.h" /* For php_json_serializable_ce */
+#include "zend_interfaces.h" /* For zend_ce_iterator */
 
 #include "php_simdjson.h"
 
@@ -1115,6 +1116,154 @@ static sapi_post_entry simdjson_post_entry = {
 };
 #endif
 
+/*
+ * SimdJsonDecodeIterator: a native Iterator backed by simdjson_decode_iterator_state,
+ * lazily decoding one JSON document at a time from a concatenated/NDJSON-style string.
+ */
+
+static zend_class_entry *simdjson_decode_iterator_ce;
+static zend_object_handlers simdjson_decode_iterator_handlers;
+
+struct simdjson_decode_iterator_object {
+    simdjson_decode_iterator_state *state;
+    zval current;
+    bool valid;
+    zend_object std;
+};
+
+#define Z_SIMDJSON_DECODE_ITERATOR_P(zv) ZEND_CONTAINER_OF(Z_OBJ_P(zv), simdjson_decode_iterator_object, std)
+
+static zend_object *simdjson_decode_iterator_create_object(zend_class_entry *ce) {
+    simdjson_decode_iterator_object *intern = (simdjson_decode_iterator_object *) zend_object_alloc(sizeof(simdjson_decode_iterator_object), ce);
+
+    zend_object_std_init(&intern->std, ce);
+    object_properties_init(&intern->std, ce);
+
+    intern->state = NULL;
+    intern->valid = false;
+    ZVAL_UNDEF(&intern->current);
+
+    intern->std.handlers = &simdjson_decode_iterator_handlers;
+
+    return &intern->std;
+}
+
+static void simdjson_decode_iterator_free_obj(zend_object *object) {
+    simdjson_decode_iterator_object *intern = ZEND_CONTAINER_OF(object, simdjson_decode_iterator_object, std);
+
+    simdjson_decode_iterator_free(intern->state);
+    zval_ptr_dtor(&intern->current);
+
+    zend_object_std_dtor(&intern->std);
+}
+
+// Advances the iterator, updating the cached current value/validity, and throws on error.
+static void simdjson_decode_iterator_do_advance(simdjson_decode_iterator_object *intern) {
+    zval_ptr_dtor(&intern->current);
+    ZVAL_UNDEF(&intern->current);
+
+    simdjson_php_error_code error;
+    intern->valid = simdjson_decode_iterator_advance(intern->state, &intern->current, &error);
+
+    if (UNEXPECTED(error)) {
+        intern->valid = false;
+        php_simdjson_throw_jsonexception(error);
+    }
+}
+
+PHP_METHOD(SimdJsonDecodeIterator, rewind) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(ZEND_THIS);
+
+    if (UNEXPECTED(simdjson_decode_iterator_current_index(intern->state) >= 0)) {
+        zend_throw_error(NULL, "Cannot rewind a SimdJsonDecodeIterator that has already been advanced");
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_do_advance(intern);
+}
+
+PHP_METHOD(SimdJsonDecodeIterator, valid) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(ZEND_THIS);
+
+    RETURN_BOOL(intern->valid);
+}
+
+PHP_METHOD(SimdJsonDecodeIterator, current) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(ZEND_THIS);
+
+    if (intern->valid) {
+        RETURN_COPY(&intern->current);
+    }
+    RETURN_NULL();
+}
+
+PHP_METHOD(SimdJsonDecodeIterator, key) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(ZEND_THIS);
+
+    RETURN_LONG(simdjson_decode_iterator_current_index(intern->state));
+}
+
+PHP_METHOD(SimdJsonDecodeIterator, next) {
+    if (zend_parse_parameters_none() == FAILURE) {
+        RETURN_THROWS();
+    }
+
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(ZEND_THIS);
+
+    simdjson_decode_iterator_do_advance(intern);
+}
+
+PHP_FUNCTION(simdjson_decode_iterate) {
+    zend_string *json = NULL;
+    zend_bool associative = 0;
+    zend_long depth = SIMDJSON_PARSE_DEFAULT_DEPTH;
+    zend_long batch_size = 0;
+
+    ZEND_PARSE_PARAMETERS_START(1, 4)
+        Z_PARAM_STR(json)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(associative)
+        Z_PARAM_LONG(depth)
+        Z_PARAM_LONG(batch_size)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (!simdjson_validate_depth(depth, 3)) {
+        RETURN_THROWS();
+    }
+
+    if (UNEXPECTED(batch_size < 0)) {
+        zend_argument_value_error(4, "must be greater than or equal to 0");
+        RETURN_THROWS();
+    }
+
+    simdjson_php_error_code error;
+    simdjson_decode_iterator_state *state = simdjson_decode_iterator_create(json, associative, depth, batch_size, &error);
+    if (UNEXPECTED(state == NULL)) {
+        php_simdjson_throw_jsonexception(error);
+        RETURN_THROWS();
+    }
+
+    object_init_ex(return_value, simdjson_decode_iterator_ce);
+    simdjson_decode_iterator_object *intern = Z_SIMDJSON_DECODE_ITERATOR_P(return_value);
+    intern->state = state;
+}
+
 /** {{{ PHP_MINIT_FUNCTION
 */
 PHP_MINIT_FUNCTION (simdjson) {
@@ -1128,6 +1277,12 @@ PHP_MINIT_FUNCTION (simdjson) {
 	simdjson_encoder_exception_ce = register_class_SimdJsonEncoderException(simdjson_exception_ce);
 
 	simdjson_base64_encode_ce = register_class_SimdJsonBase64Encode(php_json_serializable_ce);
+
+    simdjson_decode_iterator_ce = register_class_SimdJsonDecodeIterator(zend_ce_iterator);
+    simdjson_decode_iterator_ce->create_object = simdjson_decode_iterator_create_object;
+    memcpy(&simdjson_decode_iterator_handlers, &std_object_handlers, sizeof(zend_object_handlers));
+    simdjson_decode_iterator_handlers.offset = offsetof(simdjson_decode_iterator_object, std);
+    simdjson_decode_iterator_handlers.free_obj = simdjson_decode_iterator_free_obj;
 
     register_simdjson_symbols(0);
 

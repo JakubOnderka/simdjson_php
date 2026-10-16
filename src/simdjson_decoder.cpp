@@ -803,3 +803,283 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_key_count(simdjson_php_par
     ZVAL_LONG(return_value, key_count);
     return simdjson::SUCCESS;
 }
+
+/*
+ * Support code for simdjson_decode_iterate() / SimdJsonDecodeIterator, which lazily decode a
+ * string containing one or more concatenated JSON documents (e.g. NDJSON / JSON Lines), using
+ * simdjson's on-demand parser::iterate_many() API to parse one document at a time.
+ */
+
+// Recursively converts an on-demand JSON value (i.e. anything nested inside a document) into a zval.
+static simdjson_php_error_code
+simdjson_ondemand_create_value(simdjson_php_parser *parser, simdjson::ondemand::value element, zval *return_value, bool associative, size_t max_depth) {
+    if (UNEXPECTED((size_t) element.current_depth() >= max_depth)) {
+        return simdjson::DEPTH_ERROR;
+    }
+
+    simdjson::ondemand::json_type type;
+    SIMDJSON_PHP_TRY(element.type().get(type));
+
+    switch (type) {
+        case simdjson::ondemand::json_type::string: {
+            std::string_view value;
+            SIMDJSON_PHP_TRY(element.get_string().get(value));
+            simdjson_set_zval_to_string(return_value, value.data(), value.size());
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::number: {
+            simdjson::ondemand::number number;
+            SIMDJSON_PHP_TRY(element.get_number().get(number));
+            if (number.is_int64()) {
+                simdjson_set_zval_to_int64(return_value, number.get_int64());
+            } else if (number.is_uint64()) {
+                /* UINT64 is used for positive values exceeding INT64_MAX */
+                ZVAL_DOUBLE(return_value, (double) number.get_uint64());
+            } else {
+                ZVAL_DOUBLE(return_value, number.get_double());
+            }
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::boolean: {
+            bool value;
+            SIMDJSON_PHP_TRY(element.get_bool().get(value));
+            ZVAL_BOOL(return_value, value);
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::null:
+            ZVAL_NULL(return_value);
+            return simdjson::SUCCESS;
+        case simdjson::ondemand::json_type::array: {
+            array_init(return_value);
+            HashTable *ht = Z_ARRVAL_P(return_value);
+            for (auto child : element.get_array()) {
+                zval value;
+                simdjson_php_error_code error = simdjson_ondemand_create_value(parser, SIMDJSON_PHP_VALUE(child), &value, associative, max_depth);
+                if (UNEXPECTED(error)) {
+                    zval_ptr_dtor(return_value);
+                    ZVAL_NULL(return_value);
+                    return error;
+                }
+                zend_hash_next_index_insert_new(ht, &value);
+            }
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::object: {
+            HashTable *ht = associative ? simdjson_init_mixed_array(return_value, 0) : simdjson_init_object(return_value, 0);
+
+            for (auto field_result : element.get_object()) {
+                simdjson::ondemand::field field = SIMDJSON_PHP_VALUE(field_result);
+                std::string_view key;
+                simdjson_php_error_code key_error = (simdjson_php_error_code) field.unescaped_key().get(key);
+                if (UNEXPECTED(key_error)) {
+                    zval_ptr_dtor(return_value);
+                    ZVAL_NULL(return_value);
+                    return key_error;
+                }
+
+                if (!associative && UNEXPECTED(key.size() > 0 && key.data()[0] == '\0')) {
+                    zval_ptr_dtor(return_value);
+                    ZVAL_NULL(return_value);
+                    return SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY;
+                }
+
+                zval value;
+                simdjson_php_error_code error = simdjson_ondemand_create_value(parser, field.value(), &value, associative, max_depth);
+                if (UNEXPECTED(error)) {
+                    zval_ptr_dtor(return_value);
+                    ZVAL_NULL(return_value);
+                    return error;
+                }
+
+                if (associative) {
+                    simdjson_add_key_to_symtable(ht, key.data(), key.size(), &value, &parser->dedup_key_strings);
+                } else {
+                    simdjson_add_key_to_object(ht, key.data(), key.size(), &value, &parser->dedup_key_strings);
+                }
+            }
+            return simdjson::SUCCESS;
+        }
+        default:
+            ZEND_UNREACHABLE();
+    }
+}
+
+// Converts the root value of an on-demand document (from a document_stream) into a zval.
+static simdjson_php_error_code
+simdjson_ondemand_create_document(simdjson_php_parser *parser, simdjson::ondemand::document_reference doc, zval *return_value, bool associative, size_t max_depth) {
+    simdjson::ondemand::json_type type;
+    SIMDJSON_PHP_TRY(doc.type().get(type));
+
+    switch (type) {
+        case simdjson::ondemand::json_type::string: {
+            std::string_view value;
+            SIMDJSON_PHP_TRY(doc.get_string().get(value));
+            simdjson_set_zval_to_string(return_value, value.data(), value.size());
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::number: {
+            simdjson::ondemand::number number;
+            SIMDJSON_PHP_TRY(doc.get_number().get(number));
+            if (number.is_int64()) {
+                simdjson_set_zval_to_int64(return_value, number.get_int64());
+            } else if (number.is_uint64()) {
+                ZVAL_DOUBLE(return_value, (double) number.get_uint64());
+            } else {
+                ZVAL_DOUBLE(return_value, number.get_double());
+            }
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::boolean: {
+            bool value;
+            SIMDJSON_PHP_TRY(doc.get_bool().get(value));
+            ZVAL_BOOL(return_value, value);
+            return simdjson::SUCCESS;
+        }
+        case simdjson::ondemand::json_type::null:
+            ZVAL_NULL(return_value);
+            return simdjson::SUCCESS;
+        case simdjson::ondemand::json_type::array:
+        case simdjson::ondemand::json_type::object: {
+            simdjson::ondemand::value value;
+            SIMDJSON_PHP_TRY(doc.get_value().get(value));
+            return simdjson_ondemand_create_value(parser, value, return_value, associative, max_depth);
+        }
+        default:
+            ZEND_UNREACHABLE();
+    }
+}
+
+struct simdjson_decode_iterator_state {
+    simdjson_php_parser *parser;
+    simdjson::padded_string buffer;
+    // Set (with an extra reference held) when the buffer is reused directly from the
+    // zend_string instead of being copied into `buffer`; kept alive for the whole
+    // lifetime of the iterator since the stream reads from it lazily on each advance().
+    zend_string *json;
+    simdjson::ondemand::document_stream stream;
+    simdjson::ondemand::document_stream::iterator it;
+    bool associative;
+    size_t depth;
+    zend_long index;
+    bool finished;
+};
+
+simdjson_decode_iterator_state *
+simdjson_decode_iterator_create(const zend_string *json, bool associative, size_t depth, size_t batch_size, simdjson_php_error_code *error) {
+    *error = simdjson::SUCCESS;
+
+    if (batch_size == 0) {
+        // Same default simdjson itself uses for parser::iterate_many(). Note that batch_size
+        // must be strictly larger than the largest individual document in the input; documents
+        // bigger than this default require the caller to pass an explicit, larger $batch_size.
+        batch_size = simdjson::ondemand::DEFAULT_BATCH_SIZE;
+    }
+
+    simdjson_decode_iterator_state *state = new simdjson_decode_iterator_state();
+    state->parser = php_simdjson_create_parser();
+    state->json = NULL;
+    state->associative = associative;
+    state->depth = depth;
+    state->index = -1;
+    state->finished = false;
+
+    // Same heuristic used by simdjson_padded_string_view(): reuse the zend_string's own
+    // buffer directly (avoiding a copy of potentially the whole input) when there is enough
+    // spare capacity after it for simdjson's required padding; otherwise fall back to a copy.
+    // Since the stream reads from the buffer lazily on each advance(), an extra reference to
+    // the zend_string must be kept alive for as long as the iterator itself.
+    simdjson::padded_string_view view;
+    if (UNEXPECTED(simdjson_realloc_needed(json))) {
+        state->buffer = simdjson::padded_string(ZSTR_VAL(json), ZSTR_LEN(json));
+        view = state->buffer;
+    } else {
+        zend_string *json_mut = const_cast<zend_string *>(json);
+        GC_ADDREF(json_mut);
+        state->json = json_mut;
+        view = simdjson::padded_string_view(ZSTR_VAL(json), ZSTR_LEN(json), ZSTR_LEN(json) + simdjson::SIMDJSON_PADDING);
+    }
+
+    auto alloc_error = state->parser->ondemand_parser.allocate(batch_size, depth);
+    if (UNEXPECTED(alloc_error)) {
+        *error = (simdjson_php_error_code) alloc_error;
+        if (state->json) {
+            zend_string_release_ex(state->json, 0);
+        }
+        php_simdjson_free_parser(state->parser);
+        delete state;
+        return NULL;
+    }
+
+    auto stream_result = state->parser->ondemand_parser.iterate_many(view, batch_size);
+    if (UNEXPECTED(stream_result.error())) {
+        *error = (simdjson_php_error_code) stream_result.error();
+        if (state->json) {
+            zend_string_release_ex(state->json, 0);
+        }
+        php_simdjson_free_parser(state->parser);
+        delete state;
+        return NULL;
+    }
+    state->stream = std::move(stream_result.value_unsafe());
+
+    return state;
+}
+
+void simdjson_decode_iterator_free(simdjson_decode_iterator_state *state) {
+    if (state) {
+        if (state->json) {
+            zend_string_release_ex(state->json, 0);
+        }
+        php_simdjson_free_parser(state->parser);
+        delete state;
+    }
+}
+
+zend_long simdjson_decode_iterator_current_index(const simdjson_decode_iterator_state *state) {
+    return state ? state->index : -1;
+}
+
+bool simdjson_decode_iterator_advance(simdjson_decode_iterator_state *state, zval *return_value, simdjson_php_error_code *error) {
+    *error = simdjson::SUCCESS;
+    if (!state || state->finished) {
+        return false;
+    }
+
+    if (state->index < 0) {
+        // First call: fetch the initial position. state->index only becomes >= 0 after a
+        // successful advance, and any failure on this first call sets state->finished (checked
+        // above), so this branch is only ever taken once.
+        state->it = state->stream.begin();
+    } else {
+        ++state->it;
+    }
+
+    if (state->it.at_end()) {
+        state->finished = true;
+        return false;
+    }
+
+    auto it_error = state->it.error();
+    if (UNEXPECTED(it_error)) {
+        state->finished = true;
+        *error = (simdjson_php_error_code) it_error;
+        return false;
+    }
+
+    simdjson::ondemand::document_reference doc = (*state->it).value_unsafe();
+
+#if PHP_VERSION_ID >= 80200
+    // Allocate table for reusing already allocated keys, same as simdjson_convert_element
+    simdjson_dedup_key_strings_init(&state->parser->dedup_key_strings, state->parser->dedup_key_strings_data);
+#endif
+
+    simdjson_php_error_code convert_error = simdjson_ondemand_create_document(state->parser, doc, return_value, state->associative, state->depth);
+    if (UNEXPECTED(convert_error)) {
+        state->finished = true;
+        *error = convert_error;
+        return false;
+    }
+
+    state->index++;
+    return true;
+}
