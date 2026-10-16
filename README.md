@@ -173,5 +173,59 @@ simdjson_decode_from_stream(fopen("file.json", "r")); // load from file.json
 simdjson_decode_from_stream(fopen("php://input", "r")); // send by user
 ```
 
+## Base64 encoding and decoding
+
+The extension provides Base64 helpers for encoding and decoding binary data.
+
+### Encoding
+
+Use `simdjson_base64_encode()` to encode a binary string into Base64:
+
+```php
+$encoded = simdjson_base64_encode($binary);
+```
+
+You can also enable Base64URL encoding according to [RFC 4648 §5](https://www.rfc-editor.org/info/rfc4648/#section-5):
+
+```php
+$encoded = simdjson_base64_encode($binary, true);
+```
+
+To insert line breaks into the output, pass a positive line length:
+
+```php
+$encoded = simdjson_base64_encode($binary, false, 76);
+```
+
+If your input is already in a PHP stream, you can encode it without first loading the whole content into a string:
+
+```php
+$stream = fopen('php://memory', 'rw');
+fwrite($stream, 'ahoj');
+fseek($stream, 0);
+
+$encoded = simdjson_base64_encode_from_stream($stream);
+```
+
+### Decoding
+
+Use `simdjson_base64_decode()` to decode a Base64 string back into binary data:
+
+```php
+$decoded = simdjson_base64_decode($encoded);
+```
+
+If you want strict validation of the input padding, enable strict mode:
+
+```php
+$decoded = simdjson_base64_decode($encoded, true);
+```
+
+Base64URL input is also supported:
+
+```php
+$decoded = simdjson_base64_decode($encoded, false, true);
+```
+
 ## Benchmarks
 See the [benchmark](./benchmark) folder for more benchmarks.
