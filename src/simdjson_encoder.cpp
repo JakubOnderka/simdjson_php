@@ -282,66 +282,25 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
 
 /* valid as single byte character or leading byte */
 #define utf8_lead(c)  ((c) < 0x80 || ((c) >= 0xC2 && (c) <= 0xF4))
-/* whether it's actually valid depends on other stuff;
- * this macro cannot check for non-shortest forms, surrogates or
- * code points above 0x10FFFF */
-#define utf8_trail(c) ((c) >= 0x80 && (c) <= 0xBF)
 
-// Simplified version of php_next_utf8_char
+// Simplified version of php_next_utf8_char following UTR #36 strategy 2
 static unsigned int simdjson_get_next_char(const unsigned char *str, size_t str_len) {
-	if (str_len < 1)
-		return 1;
-
-    /* We'll follow strategy 2. from section 3.6.1 of UTR #36:
-     * "In a reported illegal byte sequence, do not include any
-     *  non-initial byte that encodes a valid character or is a leading
-     *  byte for a valid sequence." */
-    unsigned char c;
-    c = str[0];
-    if (c < 0x80 || c < 0xc2) {
+    if (str_len < 1)
         return 1;
-    } else if (c < 0xe0) {
-        if (str_len < 2)
-            return 1;
 
-        if (!utf8_trail(str[1])) {
-            return utf8_lead(str[1]) ? 1 : 2;
-        }
-        return 2;
-    } else if (c < 0xf0) {
-        size_t avail = str_len;
-
-        if (avail < 3 ||
-                !utf8_trail(str[1]) || !utf8_trail(str[2])) {
-            if (avail < 2 || utf8_lead(str[1]))
-                return 1;
-            else if (avail < 3 || utf8_lead(str[2]))
-                return 2;
-            else
-                return 3;
-        }
-
-        return 3;
-    } else if (c < 0xf5) {
-        size_t avail = str_len;
-
-        if (avail < 4 ||
-                !utf8_trail(str[1]) || !utf8_trail(str[2]) ||
-                !utf8_trail(str[3])) {
-            if (avail < 2 || utf8_lead(str[1]))
-                return 1;
-            else if (avail < 3 || utf8_lead(str[2]))
-                return 2;
-            else if (avail < 4 || utf8_lead(str[3]))
-                return 3;
-            else
-                return 4;
-        }
-
-        return 4;
-    } else {
+    unsigned char c = str[0];
+    if (c < 0xc2 || c >= 0xf5) {
         return 1;
     }
+
+    unsigned int expected = (c < 0xe0) ? 2 : ((c < 0xf0) ? 3 : 4);
+    for (unsigned int i = 1; i < expected; i++) {
+        if (str_len <= i || utf8_lead(str[i])) {
+            return i;
+        }
+    }
+
+    return expected;
 }
 
 static void simdjson_escape_substitute_string(smart_str *buf, const char *s, size_t len, bool substitute) {
