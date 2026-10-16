@@ -51,6 +51,7 @@ extern "C" {
 #endif
 #ifdef SIMDJSON_ENCODER_SSE2
 #include "simdjson_avx2.h"
+#include "simdjson_avx512.h"
 #endif
 #include "simdjson.h"
 #include "simdjson_compatibility.h"
@@ -216,8 +217,20 @@ static zend_always_inline bool simdjson_avx2_supported() {
     return __builtin_cpu_supports("avx2"); // check support in runtime
 }
 
-TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
+static zend_always_inline bool simdjson_avx512_supported() {
+#ifdef __AVX512BW__
+    return true;
+#endif
+
+    return __builtin_cpu_supports("avx512bw"); // check support in runtime
+}
+
+SIMDJSON_TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
 	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
+}
+
+SIMDJSON_TARGET_AVX512 static inline void simdjson_escape_long_string_avx512(smart_str *buf, const char *s, size_t len) {
+    return simdjson_escape_long_string<simdjson_avx512>(buf, s, len);
 }
 #endif
 
@@ -374,10 +387,15 @@ static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simd
     }
 
 #ifdef SIMDJSON_ENCODER_SSE2
-   if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
+    if (len >= sizeof(simdjson_avx512) && simdjson_avx512_supported()) {
+        simdjson_escape_long_string_avx512(buf, s, len);
+        return SUCCESS;
+    }
+
+    if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
      	simdjson_escape_long_string_avx2(buf, s, len);
         return SUCCESS;
-   }
+    }
 #endif
 
 #ifdef SIMDJSON_ENCODER_VECTOR8
@@ -1021,14 +1039,16 @@ zend_result simdjson_encode_write_stream(smart_str *buf, simdjson_encoder* encod
 
 const char* simdjson_encode_implementation() {
 #ifdef SIMDJSON_ENCODER_SSE2
-      if (simdjson_avx2_supported()) {
-          return "AVX2";
-      } else {
-          return "SSE2";
-      }
+    if (simdjson_avx512_supported()) {
+        return "AVX512";
+    } else if (simdjson_avx2_supported()) {
+        return "AVX2";
+    } else {
+        return "SSE2";
+    }
 #elif defined(SIMDJSON_ENCODER_VECTOR8)
-      return "ARM64 NEON";
+    return "ARM64 NEON";
 #else
-      return "Generic";
+    return "Generic";
 #endif
 }
