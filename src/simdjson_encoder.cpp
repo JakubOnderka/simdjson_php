@@ -860,6 +860,11 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	SIMDJSON_HASH_PROTECT_RECURSION(myht);
 #endif
 
+    /* jsonSerialize() may drop the last reference to the object, e.g. by
+     * nulling a reference that aliases the encoded array slot; keep it alive
+     * so the recursion guard and the identity check below stay valid. */
+    GC_ADDREF(obj);
+
     zend_function *json_serialize_method = (zend_function*)zend_hash_find_ex_ptr(&ce->function_table, simdjson_json_serialize, 1);
     ZEND_ASSERT(json_serialize_method != NULL && "This should be guaranteed prior to calling this function");
     zend_call_known_instance_method_with_0_params(json_serialize_method, obj, &retval);
@@ -870,6 +875,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 #else
 		SIMDJSON_HASH_UNPROTECT_RECURSION(myht);
 #endif
+        OBJ_RELEASE(obj);
 		return FAILURE;
 	}
 
@@ -892,6 +898,7 @@ static zend_result simdjson_encode_serializable_object(smart_str *buf, zval *val
 	}
 
 	zval_ptr_dtor(&retval);
+    OBJ_RELEASE(obj);
 
 	return return_code;
 }
