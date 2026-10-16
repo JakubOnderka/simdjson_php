@@ -117,12 +117,10 @@ jobs:
         with:
           php-version: "${{ matrix.php-version }}"
           extensions: json
-          # for correct php-config extension dir, see https://github.com/shivammathur/setup-php/issues/147
-          tools: pecl, phpize, php-config
+          tools: phpize, php-config
 
       - name: Build extension
         run: |
-          php-config --extension-dir
           phpize
           ./configure
           make -j$(nproc)
@@ -135,7 +133,7 @@ jobs:
         run: |
             make test TESTS="--show-diff -j2 -q"
 
-      - name: Show
+      - name: Show info
         run: "php -dextension=simdjson.so --ri simdjson"
 
       - name: Error log
