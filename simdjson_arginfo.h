@@ -1,5 +1,5 @@
 /* This is a generated file, edit the .stub.php file instead.
- * Stub hash: c60ee2838994f661b6f698d646f061140685fac6 */
+ * Stub hash: c9bdfc66abcafd6fd3cea3056e26edb10b0de63a */
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_validate, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
@@ -23,6 +23,13 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_decode_from_input, 0, 0, IS_MIXED, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_simdjson_decode_iterate, 0, 1, SimdJsonDecodeIterator, 0)
+	ZEND_ARG_TYPE_INFO(0, json, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, associative, _IS_BOOL, 0, "false")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, depth, IS_LONG, 0, "512")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, batch_size, IS_LONG, 0, "0")
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_key_value, 0, 2, IS_MIXED, 0)
@@ -87,13 +94,26 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_simdjson_base64_encode_from_stre
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, line_length, IS_LONG, 0, "0")
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonDecodeIterator_current, 0, 0, IS_MIXED, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonDecodeIterator_key, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonDecodeIterator_next, 0, 0, IS_VOID, 0)
+ZEND_END_ARG_INFO()
+
+#define arginfo_class_SimdJsonDecodeIterator_rewind arginfo_class_SimdJsonDecodeIterator_next
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonDecodeIterator_valid, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_SimdJsonBase64Encode___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, string, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, base64url, _IS_BOOL, 0, "false")
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonBase64Encode_jsonSerialize, 0, 0, IS_MIXED, 0)
-ZEND_END_ARG_INFO()
+#define arginfo_class_SimdJsonBase64Encode_jsonSerialize arginfo_class_SimdJsonDecodeIterator_current
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_SimdJsonBase64Encode___toString, 0, 0, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -135,6 +155,7 @@ ZEND_FUNCTION(simdjson_validate);
 ZEND_FUNCTION(simdjson_decode);
 ZEND_FUNCTION(simdjson_decode_from_stream);
 ZEND_FUNCTION(simdjson_decode_from_input);
+ZEND_FUNCTION(simdjson_decode_iterate);
 ZEND_FUNCTION(simdjson_key_value);
 ZEND_FUNCTION(simdjson_key_count);
 ZEND_FUNCTION(simdjson_key_exists);
@@ -146,6 +167,11 @@ ZEND_FUNCTION(simdjson_encode_to_stream);
 ZEND_FUNCTION(simdjson_base64_decode);
 ZEND_FUNCTION(simdjson_base64_encode);
 ZEND_FUNCTION(simdjson_base64_encode_from_stream);
+ZEND_METHOD(SimdJsonDecodeIterator, current);
+ZEND_METHOD(SimdJsonDecodeIterator, key);
+ZEND_METHOD(SimdJsonDecodeIterator, next);
+ZEND_METHOD(SimdJsonDecodeIterator, rewind);
+ZEND_METHOD(SimdJsonDecodeIterator, valid);
 ZEND_METHOD(SimdJsonBase64Encode, __construct);
 ZEND_METHOD(SimdJsonBase64Encode, jsonSerialize);
 
@@ -159,6 +185,7 @@ static const zend_function_entry ext_functions[] = {
 	ZEND_FE(simdjson_decode, arginfo_simdjson_decode)
 	ZEND_FE(simdjson_decode_from_stream, arginfo_simdjson_decode_from_stream)
 	ZEND_FE(simdjson_decode_from_input, arginfo_simdjson_decode_from_input)
+	ZEND_FE(simdjson_decode_iterate, arginfo_simdjson_decode_iterate)
 	ZEND_FE(simdjson_key_value, arginfo_simdjson_key_value)
 	ZEND_FE(simdjson_key_count, arginfo_simdjson_key_count)
 	ZEND_FE(simdjson_key_exists, arginfo_simdjson_key_exists)
@@ -202,6 +229,15 @@ static const zend_function_entry ext_functions[] = {
 #endif
 #endif
 	ZEND_FE(simdjson_base64_encode_from_stream, arginfo_simdjson_base64_encode_from_stream)
+	ZEND_FE_END
+};
+
+static const zend_function_entry class_SimdJsonDecodeIterator_methods[] = {
+	ZEND_ME(SimdJsonDecodeIterator, current, arginfo_class_SimdJsonDecodeIterator_current, ZEND_ACC_PUBLIC)
+	ZEND_ME(SimdJsonDecodeIterator, key, arginfo_class_SimdJsonDecodeIterator_key, ZEND_ACC_PUBLIC)
+	ZEND_ME(SimdJsonDecodeIterator, next, arginfo_class_SimdJsonDecodeIterator_next, ZEND_ACC_PUBLIC)
+	ZEND_ME(SimdJsonDecodeIterator, rewind, arginfo_class_SimdJsonDecodeIterator_rewind, ZEND_ACC_PUBLIC)
+	ZEND_ME(SimdJsonDecodeIterator, valid, arginfo_class_SimdJsonDecodeIterator_valid, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -262,6 +298,22 @@ static void register_simdjson_symbols(int module_number)
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_KEY_COUNT_NOT_COUNTABLE", SIMDJSON_PHP_ERR_KEY_COUNT_NOT_COUNTABLE, CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_INVALID_PROPERTY", SIMDJSON_PHP_ERR_INVALID_PHP_PROPERTY, CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SIMDJSON_ERR_INPUT_SIZE_EXCEEDS", SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS, CONST_PERSISTENT);
+}
+
+static zend_class_entry *register_class_SimdJsonDecodeIterator(zend_class_entry *class_entry_Iterator)
+{
+	zend_class_entry ce, *class_entry;
+
+	INIT_CLASS_ENTRY(ce, "SimdJsonDecodeIterator", class_SimdJsonDecodeIterator_methods);
+#if (PHP_VERSION_ID >= 80400)
+	class_entry = zend_register_internal_class_with_flags(&ce, NULL, ZEND_ACC_FINAL);
+#else
+	class_entry = zend_register_internal_class_ex(&ce, NULL);
+	class_entry->ce_flags |= ZEND_ACC_FINAL;
+#endif
+	zend_class_implements(class_entry, 1, class_entry_Iterator);
+
+	return class_entry;
 }
 
 static zend_class_entry *register_class_SimdJsonException(zend_class_entry *class_entry_RuntimeException)

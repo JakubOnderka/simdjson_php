@@ -285,6 +285,51 @@ function simdjson_decode_from_stream($res, bool $associative = false, int $depth
 function simdjson_decode_from_input(bool $associative = false, int $depth = 512): mixed {}
 
 /**
+ * Iterator over the JSON documents produced by simdjson_decode_iterate().
+ *
+ * Documents are decoded lazily: each document is only parsed from the underlying JSON string
+ * when the iterator is advanced to it (using simdjson's on-demand iterate_many() API), so the
+ * whole result does not need to be held in memory at once.
+ *
+ * @internal Instances are created by simdjson_decode_iterate(); this class should not be
+ *           constructed directly.
+ */
+final class SimdJsonDecodeIterator implements Iterator {
+    /** @return array|stdClass|string|float|int|bool|null */
+    public function current(): mixed {}
+
+    public function key(): int {}
+
+    public function next(): void {}
+
+    public function rewind(): void {}
+
+    public function valid(): bool {}
+}
+
+/**
+ * Decodes a string containing one or more concatenated JSON documents (e.g. NDJSON / JSON Lines),
+ * parsing them lazily one at a time using simdjson's on-demand iterate_many() API.
+ *
+ * Documents must be separated by ASCII whitespace, except that documents that are objects or
+ * arrays may be concatenated with no separator.
+ *
+ * @param string $json The concatenated JSON documents being decoded
+ * @param bool $associative When true, JSON objects will be returned as associative arrays.
+ *                          When false, JSON objects will be returned as objects.
+ * @param int $depth the maximum nesting depth of the structure being decoded.
+ * @param int $batch_size Must be larger than the largest individual document in $json.
+ *                        Defaults to 0, which uses simdjson's own default batch size (1,000,000
+ *                        bytes). If $json contains an individual document larger than that,
+ *                        pass an explicit $batch_size large enough to hold it.
+ * @return SimdJsonDecodeIterator
+ * @throws SimdJsonDecoderException for invalid JSON
+ *                           (or a document over 4GB long, or out of range integer/float)
+ * @throws ValueError for invalid $depth or negative $batch_size
+ */
+function simdjson_decode_iterate(string $json, bool $associative = false, int $depth = 512, int $batch_size = 0): SimdJsonDecodeIterator {}
+
+/**
  * Returns the value at the json pointer $key
  *
  * @param string $json The JSON string being decoded

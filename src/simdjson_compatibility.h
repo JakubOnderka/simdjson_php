@@ -17,7 +17,7 @@
 
 // ZEND_CONTAINER_OF is available since PHP 8.6
 #ifndef ZEND_CONTAINER_OF
-#define ZEND_CONTAINER_OF(ptr, Type, member) ((Type*)((char*)(ptr) - XtOffsetOf(Type, member)))
+#define ZEND_CONTAINER_OF(ptr, Type, member) ((Type*)((char*)(ptr) - offsetof(Type, member)))
 #endif
 
 #ifndef ZEND_FALLTHROUGH

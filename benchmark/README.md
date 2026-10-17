@@ -27,6 +27,14 @@ Execute from project root folder:
 php benchmark/vendor/bin/phpbench run --report=table --group decode
 ```
 
+Compare parsing an approximately 1 MiB ECS-style NDJSON fixture (1,024 records, 1,024 bytes per line) using the lazy simdjson iterator against splitting on newlines and calling `json_decode()` for each line:
+
+```
+php benchmark/vendor/bin/phpbench run --report=table --group ndjson
+```
+
+The benchmark creates the deterministic fixture in the system temporary directory before timing begins.
+
 The output should look like this (Example output is using an optimized php 7.4 NTS build with the simdjson Intel/AMD AVX2 implementation):
 
 ```
