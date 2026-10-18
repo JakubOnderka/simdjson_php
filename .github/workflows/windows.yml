@@ -1,0 +1,25 @@
+name: Windows extension build & test
+on: [push, pull_request]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: [ '8.2', '8.3', '8.4', '8.5' ]
+        ts: [ 'nts', 'ts' ]
+        arch: [ 'x64' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build extension
+        id: build
+        uses: php/php-windows-builder/extension@v1
+        with:
+          php-version: ${{ matrix.php-version }}
+          ts: ${{ matrix.ts }}
+          arch: ${{ matrix.arch }}
