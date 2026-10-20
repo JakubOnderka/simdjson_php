@@ -194,6 +194,12 @@ PHP_FUNCTION(simdjson_validate) {
         RETURN_THROWS();
     }
 
+    // return_value will be overwritten by RETURN_TRUE in case it is simple value
+    if (simdjson_simple_decode(ZSTR_VAL(json), ZSTR_LEN(json), return_value, true)) {
+        GC_ADD_FLAGS(json, IS_STR_VALID_UTF8); // valid json is always valid UTF8 string
+        RETURN_TRUE;
+    }
+
     simdjson_php_error_code error;
     if (SIMDJSON_SHOULD_REUSE_PARSER(ZSTR_LEN(json))) {
         error = php_simdjson_validate(simdjson_get_reused_parser(), json, depth);
@@ -203,7 +209,12 @@ PHP_FUNCTION(simdjson_validate) {
         php_simdjson_free_parser(simdjson_php_parser);
     }
 
-    ZVAL_BOOL(return_value, !error);
+    if (error) {
+        RETURN_FALSE;
+    } else {
+        GC_ADD_FLAGS(json, IS_STR_VALID_UTF8); // valid json is always valid UTF8 string
+        RETURN_TRUE;
+    }
 }
 
 PHP_FUNCTION(simdjson_decode) {
