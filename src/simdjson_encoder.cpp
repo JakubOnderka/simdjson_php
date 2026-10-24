@@ -387,12 +387,12 @@ static zend_result simdjson_escape_string(smart_str *buf, zend_string *str, simd
     }
 
 #ifdef SIMDJSON_ENCODER_SSE2
-    if (len >= sizeof(simdjson_avx512) && simdjson_avx512_supported()) {
+    if (len >= SIMDJSON_AVX512_SIZE && simdjson_avx512_supported()) {
         simdjson_escape_long_string_avx512(buf, s, len);
         return SUCCESS;
     }
 
-    if (len >= sizeof(simdjson_avx2) && simdjson_avx2_supported()) {
+    if (len >= SIMDJSON_AVX2_SIZE && simdjson_avx2_supported()) {
      	simdjson_escape_long_string_avx2(buf, s, len);
         return SUCCESS;
     }
