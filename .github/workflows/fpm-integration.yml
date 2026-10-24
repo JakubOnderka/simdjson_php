@@ -1,0 +1,137 @@
+name: PHP-FPM
+on: [push, pull_request]
+
+permissions:
+    contents: read
+
+jobs:
+    fpm:
+        runs-on: ubuntu-latest
+        timeout-minutes: 25
+        strategy:
+            fail-fast: false
+            matrix:
+                php-version: ['8.3', '8.4', '8.5']
+                workers: [1, 4]
+
+        name: PHP ${{ matrix.php-version }} with ${{ matrix.workers }} workers
+
+        steps:
+            - uses: actions/checkout@v7
+
+            - name: Install system packages
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends \
+                    nginx curl autoconf make g++ pkg-config libxml2-dev procps
+
+            - name: Install PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ matrix.php-version }}
+                  tools: phpize, php-config
+                  extensions: json
+                  coverage: none
+
+            - name: Build and enable simdjson extension
+              run: |
+                  phpize
+                  ./configure --enable-simdjson
+                  make -j"$(nproc)"
+                  sudo make install
+                  PHP_EXT_DIR="$(php-config --extension-dir)"
+                  echo "extension=simdjson.so" | sudo tee /etc/php/${{ matrix.php-version }}/fpm/conf.d/99-simdjson.ini >/dev/null
+                  php -d extension=simdjson.so --ri simdjson
+
+            - name: Configure php-fpm pool
+              run: |
+                  FPMV="${{ matrix.php-version }}"
+                  sudo tee /etc/php/${FPMV}/fpm/pool.d/zz-simdjson-test.conf >/dev/null <<'EOF'
+                  [www]
+                  user = www-data
+                  group = www-data
+                  listen = /run/php/php-fpm-simdjson.sock
+                  listen.owner = www-data
+                  listen.group = www-data
+                  pm = static
+                  pm.max_children = WORKERS_REPLACE
+                  pm.max_requests = 0
+                  catch_workers_output = yes
+                  request_terminate_timeout = 60s
+                  clear_env = no
+                  EOF
+                  sudo sed -i "s/WORKERS_REPLACE/${{ matrix.workers }}/g" /etc/php/${FPMV}/fpm/pool.d/zz-simdjson-test.conf
+
+                  # Disable default www pool to avoid port/socket conflicts
+                  sudo mv /etc/php/${FPMV}/fpm/pool.d/www.conf /etc/php/${FPMV}/fpm/pool.d/www.conf.disabled
+
+            - name: Configure nginx + test app
+              run: |
+                  sudo mkdir -p /var/www/simdjson-test
+                  sudo cp .github/workflows/fpm.php /var/www/simdjson-test/index.php
+
+                  sudo tee /etc/nginx/sites-available/simdjson-fpm-test >/dev/null <<'NGINX'
+                  server {
+                      listen 8080;
+                      server_name _;
+                      root /var/www/simdjson-test;
+                      index index.php;
+                      client_max_body_size 16m;
+
+                      location / {
+                          try_files $uri /index.php?$query_string;
+                      }
+
+                      location ~ \.php$ {
+                          include snippets/fastcgi-php.conf;
+                          fastcgi_pass unix:/run/php/php-fpm-simdjson.sock;
+                          fastcgi_read_timeout 60s;
+                      }
+                  }
+                  NGINX
+
+                  sudo rm -f /etc/nginx/sites-enabled/default
+                  sudo ln -sf /etc/nginx/sites-available/simdjson-fpm-test /etc/nginx/sites-enabled/simdjson-fpm-test
+                  sudo nginx -t
+
+            - name: Start services
+              run: |
+                    sudo systemctl restart php${{ matrix.php-version }}-fpm
+                    sudo systemctl restart nginx
+
+                    for i in $(seq 1 40); do
+                      if curl -sS -o /dev/null -w '%{http_code}' \
+                        -H 'Content-Type: application/json' \
+                        --data '{"ready":true}' \
+                        http://127.0.0.1:8080/ | grep -q '^200$'; then
+                        break
+                      fi
+                      sleep 1
+                    done
+
+                    # snapshot worker PIDs before tests
+                    pgrep -f "php-fpm: pool www" | sort -n > before.pids || true
+                    if [ ! -s before.pids ]; then
+                      # fallback for different process title format
+                      pgrep -f "php-fpm.*pool" | sort -n > before.pids
+                    fi
+                    cat before.pids
+                    test "$(wc -l < before.pids)" -ge 1
+
+            - name: Run multi-request stress test
+              run: python3 .github/workflows/run_fpm_test.py
+
+            - name: Verify workers not replaced (best effort)
+              run: |
+                  pgrep -f "php-fpm: pool www" | sort -n > after.pids || true
+                  if [ ! -s after.pids ]; then
+                    pgrep -f "php-fpm.*pool" | sort -n > after.pids
+                  fi
+                  cat after.pids
+                  diff -u before.pids after.pids
+
+            - name: Logs on failure
+              if: failure()
+              run: |
+                  sudo journalctl -u php${{ matrix.php-version }}-fpm --no-pager -n 300 || true
+                  sudo journalctl -u nginx --no-pager -n 300 || true
