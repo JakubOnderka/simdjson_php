@@ -5,6 +5,7 @@
 #include <x86intrin.h>
 
 #define SIMDJSON_TARGET_AVX2 __attribute__((target("avx2")))
+#define SIMDJSON_AVX2_SIZE sizeof(__m256i)
 
 #define simdjson_avx2_or _mm256_or_si256
 #define simdjson_avx2_eq _mm256_cmpeq_epi8

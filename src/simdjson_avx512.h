@@ -5,6 +5,7 @@
 #include <immintrin.h>
 
 #define SIMDJSON_TARGET_AVX512 __attribute__((target("avx512bw")))
+#define SIMDJSON_AVX512_SIZE sizeof(__m512i)
 
 #define simdjson_avx512_or(_v1, _v2) ((_v1) | (_v2))
 #define simdjson_avx512_eq _mm512_cmpeq_epi8_mask
