@@ -127,11 +127,12 @@ static zend_always_inline size_t simdjson_append_escape(char *buf, char c) {
 
 #define SIDMJSON_ZSTR_ALLOC(_size) \
     do { \
-        auto _new_end = _size + output; \
-        if (UNEXPECTED(_new_end > ZSTR_VAL(buf->s) + buf->a)) { \
-            ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s); \
-            simdjson_smart_str_erealloc(buf, ZSTR_LEN(buf->s) + _size); \
-            output = ZSTR_VAL(buf->s) + ZSTR_LEN(buf->s); \
+        const size_t requested = (_size); \
+        const size_t used = static_cast<size_t>(output - ZSTR_VAL(buf->s)); \
+        if (UNEXPECTED(requested > buf->a - used)) { \
+            ZSTR_LEN(buf->s) = used; \
+            simdjson_smart_str_erealloc(buf, used + requested); \
+            output = ZSTR_VAL(buf->s) + used; \
         } \
     } while (0); \
 
