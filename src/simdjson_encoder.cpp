@@ -968,7 +968,7 @@ again:
 			break;
 
 		case IS_DOUBLE:
-			if (EXPECTED(!zend_isinf(Z_DVAL_P(val)) && !zend_isnan(Z_DVAL_P(val)))) {
+			if (EXPECTED(zend_finite(Z_DVAL_P(val)))) {
 				simdjson_append_double(buf, Z_DVAL_P(val));
 			} else {
 				encoder->error_code = SIMDJSON_ERROR_INF_OR_NAN;
