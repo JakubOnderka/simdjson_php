@@ -114,7 +114,7 @@ suite: 1348b906f3a3db7db83e25ab05aeb9a8b3091a84, date: 2022-08-16, stime: 23:59:
 You may also run a simpler standalone benchmark script on the JSON files in [`jsonexamples`](../jsonexamples) by running the commands:
 
 ```
-php -d extension=modules/simdjson.so benchmark/benchmark.php
+php -d extension=modules/simdjson.so benchmark/benchmark_decode.php
 ```
 
 For decoding functions, the benchmark includes both the time to decode the data and the time to garbage collect/free the decoded data.
