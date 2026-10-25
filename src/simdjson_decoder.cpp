@@ -730,6 +730,8 @@ PHP_SIMDJSON_API simdjson_php_error_code php_simdjson_validate(simdjson_php_pars
             return doc.get_bool().error();
         case simdjson::ondemand::json_type::null:
             return doc.is_null().error();
+        default:
+           break; // all other values intentionally ignored
     }
 
     SIMDJSON_PHP_TRY(doc.get(value));

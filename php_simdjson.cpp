@@ -376,7 +376,7 @@ standard_decoding:
     }
 }
 
-static bool simdjson_decode_from_input_check_max_size(size_t len) {
+static bool simdjson_decode_from_input_check_max_size(zend_long len) {
     if (UNEXPECTED(SG(post_max_size) > 0 && len > SG(post_max_size))) {
         zend_throw_exception_ex(simdjson_decoder_exception_ce, SIMDJSON_PHP_ERR_INPUT_SIZE_EXCEEDS,
             "POST Content-Length of " ZEND_LONG_FMT " bytes exceeds the limit of " ZEND_LONG_FMT " bytes",
