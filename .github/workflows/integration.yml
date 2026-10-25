@@ -27,7 +27,7 @@ jobs:
       - name: Install required packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl gcc xz-utils libxml2-dev pkg-config make autoconf g++ valgrind ccache
+          sudo apt-get install -y --no-install-recommends curl gcc pkg-config make autoconf g++ valgrind ccache
 
       - name: Cache ccache
         uses: actions/cache@v6
@@ -44,7 +44,7 @@ jobs:
           mkdir /tmp/php
           cd /tmp/php
           curl -L https://www.php.net/distributions/php-${{ matrix.php-version }}.tar.xz | tar --strip-components=1 -xJf -
-          ./configure --enable-debug --without-sqlite3 --disable-pdo --disable-dom --disable-simplexml --disable-phar --without-pdo-sqlite
+          ./configure --enable-debug --disable-all --enable-cli
           make -j$(nproc)
           sudo make install
 
