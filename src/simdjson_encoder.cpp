@@ -228,11 +228,11 @@ static zend_always_inline bool simdjson_avx512_supported() {
 }
 
 SIMDJSON_TARGET_AVX2 static inline void simdjson_escape_long_string_avx2(smart_str *buf, const char *s, size_t len) {
-	return simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
+	simdjson_escape_long_string<simdjson_avx2>(buf, s, len);
 }
 
 SIMDJSON_TARGET_AVX512 static inline void simdjson_escape_long_string_avx512(smart_str *buf, const char *s, size_t len) {
-    return simdjson_escape_long_string<simdjson_avx512>(buf, s, len);
+    simdjson_escape_long_string<simdjson_avx512>(buf, s, len);
 }
 #endif
 
@@ -252,18 +252,15 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
     if (len >= 8) {
         // Check whole string by 8 bytes words, the last word overlaps the previous one when len is not multiple of 8
         const char *p = s;
-        bool clean = true;
+        uint64_t word;
         for (; p + 8 < end; p += 8) {
-            uint64_t word;
             memcpy(&word, p, 8);
             if (UNEXPECTED(simdjson_word_needs_escaping(word))) {
-                clean = false;
-                break;
+                goto non_clean;
             }
         }
-        uint64_t last;
-        memcpy(&last, end - 8, 8);
-        if (EXPECTED(clean && !simdjson_word_needs_escaping(last))) {
+        memcpy(&word, end - 8, 8);
+        if (EXPECTED(!simdjson_word_needs_escaping(word))) {
             char *output = simdjson_smart_str_alloc(buf, len + 2);
             *output++ = '"';
             if (EXPECTED(len <= 16)) {
@@ -278,6 +275,7 @@ static zend_always_inline void simdjson_escape_short_string(smart_str *buf, cons
         }
     }
 
+non_clean:
     // For short strings allocate maximum possible string length, so we can write directly to output buffer
     char *output = simdjson_smart_str_alloc(buf, len * 6 + 4);
 
