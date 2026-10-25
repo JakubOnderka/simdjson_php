@@ -161,6 +161,7 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
 		} else {
             // Allocate enough space for escaped chunk + space for rest of unescaped string
             SIDMJSON_ZSTR_ALLOC((sizeof(chunk) * SIMDJSON_ENCODER_ESCAPE_LENGTH) + (start + len - s));
+
             // Copy first bytes that do not need escaping in chunk without checking
             auto j = chunk.escape_index(needs_escaping);
             memcpy(output, s, j);
@@ -190,18 +191,19 @@ static zend_always_inline void simdjson_escape_long_string(smart_str *buf, const
             memcpy(output, s, rest);
             output += rest;
             s += rest;
+        } else {
+            // Finish last chars of string
+            while (s < start + len) {
+                char c = *s++;
+                if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
+                    *output++ = c;
+                } else {
+                    output += simdjson_append_escape(output, c);
+                }
+            }
         }
     }
 
-    // Finish last chars of string
-    while (s < start + len) {
-		char c = *s++;
-		if (EXPECTED(simdjson_need_escaping[(uint8_t)c] == 0)) {
-			*output++ = c;
-		} else {
-			output += simdjson_append_escape(output, c);
-		}
-	}
     *output++ = '"';
 
     ZSTR_LEN(buf->s) = output - ZSTR_VAL(buf->s);
