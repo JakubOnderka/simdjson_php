@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-25 15:01:51 +0100. version 5.0.6 Do not edit! */
+/* auto-generated on 2026-10-27 17:48:10 +0100. version 5.0.7 Do not edit! */
 /* including simdjson.h:  */
 /* begin file simdjson.h */
 #ifndef SIMDJSON_H
@@ -2715,7 +2715,7 @@ namespace std {
 #define SIMDJSON_SIMDJSON_VERSION_H
 
 /** The version of simdjson being used (major.minor.revision) */
-#define SIMDJSON_VERSION "5.0.6"
+#define SIMDJSON_VERSION "5.0.7"
 
 namespace simdjson {
 enum {
@@ -2730,7 +2730,7 @@ enum {
   /**
    * The revision (major.minor.REVISION) of simdjson being used.
    */
-  SIMDJSON_VERSION_REVISION = 6
+  SIMDJSON_VERSION_REVISION = 7
 };
 } // namespace simdjson
 
@@ -4007,6 +4007,23 @@ public:
    */
   simdjson_warn_unused virtual error_code stage2_next(dom::document &doc) noexcept = 0;
 
+  /** @private A stage 2 entry point for parser::parse_many: see stage2_next_function. */
+  typedef error_code (*stage2_next_function_t)(dom_parser_implementation &impl, dom::document &doc);
+
+  /**
+   * @private For internal implementation use
+   *
+   * Get a function that does what stage2_next() does. dom::document_stream picks
+   * it once per batch and calls it for each document of the batch, so that the
+   * choice between the bounded and the unchecked walk costs nothing per document.
+   *
+   * Overridden by each implementation.
+   *
+   * @param bounded Whether the documents must be bounded to the structural
+   *                indexes of the batch (see _bounded_batch).
+   */
+  virtual stage2_next_function_t stage2_next_function(bool bounded) const noexcept = 0;
+
   /**
    * Unescape a valid UTF-8 string from src to dst, stopping at a final unescaped quote. There
    * must be an unescaped quote terminating the string. It returns the final output
@@ -4130,6 +4147,14 @@ public:
    * and is unaffected.
    */
   bool _unpadded{false};
+
+  /**
+   * Whether stage 2 must bound the documents of the batch indexed by the last
+   * stage 1 run to its structural indexes (dom::document_stream sets it, see
+   * document_stream::run_stage1, and passes it to stage2_next_function). Other
+   * batches keep the unchecked walk.
+   */
+  bool _bounded_batch{false};
 
 protected:
 
@@ -4886,8 +4911,23 @@ public:
   /** The number of allocated bytes. */
   inline size_t capacity() const noexcept;
 
-  /** check that the view has sufficient padding */
+  /**
+   * Check that the view has sufficient padding: either SIMDJSON_PADDING bytes of
+   * capacity past the end of the document, or enough trailing white space in
+   * the document to stand in for the missing bytes.
+   */
   inline bool has_sufficient_padding() const noexcept;
+
+  /**
+   * The parser may read up to SIMDJSON_PADDING bytes past the end of the
+   * document. When the capacity falls short of that but the document ends
+   * with enough white space to make up for it (see has_sufficient_padding()),
+   * this moves that white space out of the document and into the padding, so
+   * that padding() >= SIMDJSON_PADDING. It does nothing otherwise.
+   *
+   * @return whether the document was shortened
+   */
+  inline bool use_trailing_whitespace_as_padding() noexcept;
 
   /**
    * Remove the UTF-8 Byte Order Mark (BOM) if it exists.
@@ -5087,6 +5127,14 @@ inline bool padded_string_view::has_sufficient_padding() const noexcept {
       return false;
     }
   }
+  return true;
+}
+
+inline bool padded_string_view::use_trailing_whitespace_as_padding() noexcept {
+  if (padding() >= SIMDJSON_PADDING || !has_sufficient_padding()) {
+    return false;
+  }
+  remove_suffix(SIMDJSON_PADDING - padding());
   return true;
 }
 
@@ -7346,6 +7394,9 @@ private:
   /** Pass the next batch through stage 1 with the given parser. */
   inline error_code run_stage1(dom::parser &p, size_t batch_start) noexcept;
 
+  /** Pick the stage 2 entry point for the batch that stage 1 just indexed. */
+  inline void load_stage2() noexcept;
+
   dom::parser *parser;
   const uint8_t *buf;
   size_t len;
@@ -7356,6 +7407,8 @@ private:
   error_code error;
   size_t batch_start{0};
   size_t doc_index{};
+  /** The stage 2 entry point for the documents of the current batch (see load_stage2). */
+  internal::dom_parser_implementation::stage2_next_function_t stage2_next_fn{nullptr};
 #ifdef SIMDJSON_THREADS_ENABLED
   /** Indicates whether we use threads. Note that this needs to be a constant during the execution of the parsing. */
   bool use_thread;
@@ -10849,7 +10902,10 @@ simdjson_inline simdjson_result<element> parser::parse(const padded_string &s) &
   return parse(s.data(), s.length(), false);
 }
 simdjson_inline simdjson_result<element> parser::parse(const padded_string_view &v) & noexcept {
-  return parse(v.data(), v.length(), false);
+  if (!v.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  padded_string_view json(v);
+  json.use_trailing_whitespace_as_padding();
+  return parse(json.data(), json.length(), false);
 }
 
 inline simdjson_result<element> parser::parse_unpadded(const uint8_t *buf, size_t len) & noexcept {
@@ -10876,7 +10932,9 @@ inline simdjson_result<document_stream> parser::parse_many(const padded_string &
 }
 inline simdjson_result<document_stream> parser::parse_many(const padded_string_view &v, size_t batch_size) noexcept {
   if (!v.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
-  return parse_many(v.data(), v.length(), batch_size);
+  padded_string_view json(v);
+  json.use_trailing_whitespace_as_padding();
+  return parse_many(json.data(), json.length(), batch_size);
 }
 
 inline simdjson_result<document_stream> parser::parse_many(const uint8_t *buf, size_t len, size_t batch_size, stream_format format) noexcept {
@@ -10916,7 +10974,9 @@ inline simdjson_result<document_stream> parser::parse_many(const padded_string &
 }
 inline simdjson_result<document_stream> parser::parse_many(const padded_string_view &v, size_t batch_size, stream_format format) noexcept {
   if (!v.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
-  return parse_many(v.data(), v.length(), batch_size, format);
+  padded_string_view json(v);
+  json.use_trailing_whitespace_as_padding();
+  return parse_many(json.data(), json.length(), batch_size, format);
 }
 
 simdjson_inline size_t parser::capacity() const noexcept {
@@ -11188,6 +11248,7 @@ inline void document_stream::start() noexcept {
     error = run_stage1(*parser, batch_start);
   }
   if (error) { return; }
+  load_stage2();
 #ifdef SIMDJSON_THREADS_ENABLED
   if (use_thread && next_batch_start() < len) {
     // Kick off the first thread if needed
@@ -11264,7 +11325,7 @@ inline void document_stream::next() noexcept {
 
   // Load the next document from the batch
   doc_index = batch_start + parser->implementation->structural_indexes[parser->implementation->next_structural_index];
-  error = parser->implementation->stage2_next(parser->doc);
+  error = stage2_next_fn(*parser->implementation, parser->doc);
   // If that was the last document in the batch, load another batch (if available)
   while (error == EMPTY) {
     batch_start = next_batch_start();
@@ -11280,9 +11341,10 @@ inline void document_stream::next() noexcept {
     error = run_stage1(*parser, batch_start);
 #endif
     if (error) { continue; } // If the error was EMPTY, we may want to load another batch.
+    load_stage2();
     // Run stage 2 on the first document in the batch
     doc_index = batch_start + parser->implementation->structural_indexes[parser->implementation->next_structural_index];
-    error = parser->implementation->stage2_next(parser->doc);
+    error = stage2_next_fn(*parser->implementation, parser->doc);
   }
 }
 inline size_t document_stream::size_in_bytes() const noexcept {
@@ -11301,9 +11363,40 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Stage 1 cuts the batch after the last document that looks complete, and
+// leaves a sentinel structural index past it: stage 2 validates the documents,
+// and stops an invalid one at the sentinel because the byte there cannot
+// continue a document. That byte is not part of the batch, though: it is the
+// start of the next document, padding (which the caller need not initialize)
+// or the `]` that comma_delimited_array strips. When it is ',', ':', ']' or
+// '}', or when the batch ends where a value is expected, an invalid document
+// such as `[2` (before a truncated `[["`) could be accepted and run past the
+// batch, into stale indexes such as the quote of an unclosed string, and so
+// past the buffer. Stage 2 then walks this batch with an explicit bound (see
+// load_stage2). Other batches keep the unchecked walk.
+//
+// set_bounded_batch() makes that decision for the batch stage 1 just indexed.
+// Out of line: it runs once per batch, and inlined it would weigh on next().
+simdjson_never_inline void set_bounded_batch(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  bool bounded = false;
+  const uint32_t n = impl.n_structural_indexes;
+  if (n > 0) {
+    const uint8_t next = batch[impl.structural_indexes[n]];
+    const uint8_t last = batch[impl.structural_indexes[n - 1]];
+    bounded = next == ',' || next == ':' || next == ']' || next == '}' ||
+              last == ',' || last == ':' || last == '[' || last == '{';
+  }
+  impl._bounded_batch = bounded;
+}
+
+inline void document_stream::load_stage2() noexcept {
+  stage2_next_fn = parser->implementation->stage2_next_function(parser->implementation->_bounded_batch);
+}
+
 inline error_code document_stream::run_stage1(dom::parser &p, size_t _batch_start) noexcept {
   size_t remaining = len - _batch_start;
   stage1_mode mode;
+  size_t batch_len;
   if (remaining <= batch_size) {
     // Final batch
     switch (format) {
@@ -11317,7 +11410,7 @@ inline error_code document_stream::run_stage1(dom::parser &p, size_t _batch_star
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    batch_len = remaining;
   } else {
     // Partial batch
     switch (format) {
@@ -11331,8 +11424,11 @@ inline error_code document_stream::run_stage1(dom::parser &p, size_t _batch_star
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    batch_len = batch_size;
   }
+  error_code err = p.implementation->stage1(&buf[_batch_start], batch_len, mode);
+  if (!err) { set_bounded_batch(*p.implementation, &buf[_batch_start]); }
+  return err;
 }
 
 #ifdef SIMDJSON_THREADS_ENABLED
@@ -16842,6 +16938,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -19460,6 +19557,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -22548,6 +22646,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -25632,6 +25731,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -28834,6 +28934,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -32344,6 +32445,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -35370,6 +35472,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -38374,6 +38477,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -41401,6 +41505,7 @@ public:
   simdjson_warn_unused error_code stage1(const uint8_t *buf, size_t len, stage1_mode partial) noexcept final;
   simdjson_warn_unused error_code stage2(dom::document &doc) noexcept final;
   simdjson_warn_unused error_code stage2_next(dom::document &doc) noexcept final;
+  stage2_next_function_t stage2_next_function(bool bounded) const noexcept final;
   simdjson_warn_unused uint8_t *parse_string(const uint8_t *src, uint8_t *dst, bool allow_replacement) const noexcept final;
   simdjson_warn_unused uint8_t *parse_wobbly_string(const uint8_t *src, uint8_t *dst) const noexcept final;
   inline simdjson_warn_unused error_code set_capacity(size_t capacity) noexcept final;
@@ -83378,6 +83483,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -83970,262 +84077,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -89616,6 +89468,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -89633,6 +89486,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -89688,6 +89542,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -89714,6 +89569,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -89749,6 +89605,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -89794,6 +89651,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -101110,6 +100968,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -101702,262 +101562,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -107348,6 +106953,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -107365,6 +106971,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -107420,6 +107027,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -107446,6 +107054,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -107481,6 +107090,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -107526,6 +107136,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -119312,6 +118923,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -119904,262 +119517,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -125550,6 +124908,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -125567,6 +124926,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -125622,6 +124982,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -125648,6 +125009,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -125683,6 +125045,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -125728,6 +125091,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -137510,6 +136874,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -138102,262 +137468,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -143748,6 +142859,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -143765,6 +142877,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -143820,6 +142933,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -143846,6 +142960,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -143881,6 +142996,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -143926,6 +143042,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -155826,6 +154943,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -156418,262 +155537,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -162064,6 +160928,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -162081,6 +160946,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -162136,6 +161002,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -162162,6 +161029,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -162197,6 +161065,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -162242,6 +161111,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -174450,6 +173320,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -175042,262 +173914,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -180688,6 +179305,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -180705,6 +179323,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -180760,6 +179379,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -180786,6 +179406,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -180821,6 +179442,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -180866,6 +179488,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -192564,6 +191187,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -193156,262 +191781,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -198802,6 +197172,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -198819,6 +197190,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -198874,6 +197246,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -198900,6 +197273,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -198935,6 +197309,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -198980,6 +197355,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -210701,6 +209077,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -211293,262 +209671,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -216939,6 +215062,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -216956,6 +215080,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -217011,6 +215136,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -217037,6 +215163,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -217072,6 +215199,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -217117,6 +215245,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
@@ -228848,6 +226977,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 && !concepts::optional_type<T> &&
 !concepts::appendable_containers<T>
+// Smart pointers are handled by the generic smart-pointer tag_invoke.
+&& !concepts::smart_pointer<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -229440,262 +227571,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept {
 #endif
 }
 
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::unique_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::unique_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
-template <typename simdjson_value, typename T>
-  requires(user_defined_type<std::remove_cvref_t<T>>)
-error_code tag_invoke(deserialize_tag, simdjson_value &val, std::shared_ptr<T> &out) noexcept(false) {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  std::shared_ptr<T> ptr(new (std::nothrow) T());
-  if (!ptr) {
-    return MEMALLOC;
-  }
-  SIMDJSON_TRY(val.get(*ptr));
-  out = std::move(ptr);
-  return SUCCESS;
-}
-
 #endif // SIMDJSON_STATIC_REFLECTION
-
-////////////////////////////////////////
-// Unique pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_unique<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Shared pointers
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<bool> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<bool>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_bool().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<int64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<int64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_int64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<uint64_t> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<uint64_t>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_uint64().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<double> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<double>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_double().get(*out));
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string_view> &out) noexcept {
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset();
-    return SUCCESS;
-  }
-  if (!out) {
-    out = std::make_shared<std::string_view>();
-    if (!out) { return MEMALLOC; }
-  }
-  SIMDJSON_TRY(val.get_string().get(*out));
-  return SUCCESS;
-}
-
-
-////////////////////////////////////////
-// Explicit optional specializations
-////////////////////////////////////////
-
-////////////////////////////////////////
-// Explicit smart pointer specializations for string and int types
-////////////////////////////////////////
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::shared_ptr<std::string> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_shared<std::string>();
-  }
-  std::string_view str;
-  SIMDJSON_TRY(val.get_string().get(str));
-  *out = std::string{str};
-  return SUCCESS;
-}
-
-error_code tag_invoke(deserialize_tag, auto &val, std::unique_ptr<int> &out) noexcept {
-  // Check if the value is null
-  bool is_null_value;
-  SIMDJSON_TRY( val.is_null().get(is_null_value) );
-  if (is_null_value) {
-    out.reset(); // Set to nullptr
-    return SUCCESS;
-  }
-
-  if (!out) {
-    out = std::make_unique<int>();
-  }
-  int64_t temp;
-  SIMDJSON_TRY(val.get_int64().get(temp));
-  *out = static_cast<int>(temp);
-  return SUCCESS;
-}
 
 } // namespace simdjson
 
@@ -235086,6 +232962,7 @@ simdjson_inline simdjson_warn_unused bool parser::string_buffer_overflow(const u
 
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -235103,6 +232980,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(p
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_allow_incomplete_json(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
   _document_len = json.length();
@@ -235158,6 +233036,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate(c
 
 simdjson_warn_unused simdjson_inline simdjson_result<json_iterator> parser::iterate_raw(padded_string_view json) & noexcept {
   if (!json.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  json.use_trailing_whitespace_as_padding();
 
   json.remove_utf8_bom();
 
@@ -235184,6 +233063,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size) noexcept {
@@ -235219,6 +233099,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, bool allow_comma_separated) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, allow_comma_separated);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const padded_string &s, size_t batch_size, bool allow_comma_separated) noexcept {
@@ -235264,6 +233145,7 @@ inline simdjson_result<document_stream> parser::iterate_many(const char *buf, si
 }
 inline simdjson_result<document_stream> parser::iterate_many(padded_string_view s, size_t batch_size, stream_format format) noexcept {
   if (!s.has_sufficient_padding()) { return INSUFFICIENT_PADDING; }
+  s.use_trailing_whitespace_as_padding();
   return iterate_many(s.data(), s.length(), batch_size, format);
 }
 inline simdjson_result<document_stream> parser::iterate_many(const std::string &s, size_t batch_size, stream_format format) noexcept {
