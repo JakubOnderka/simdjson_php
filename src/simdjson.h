@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-28 16:41:05 +0100. version 5.1.1 Do not edit! */
+/* auto-generated on 2026-11-01 16:57:13 +0100. version 5.2.0 Do not edit! */
 /* including simdjson.h:  */
 /* begin file simdjson.h */
 #ifndef SIMDJSON_H
@@ -205,6 +205,24 @@
 #endif
 #endif // !defined(SIMDJSON_SUPPORTS_CHAR8_T)
 
+// std::string::resize_and_overwrite (C++23) is available.
+#if !defined(SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE)
+#if defined(__cpp_lib_string_resize_and_overwrite) && __cpp_lib_string_resize_and_overwrite >= 202110L
+#define SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE 1
+#else
+#define SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE 0
+#endif
+#endif // !defined(SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE)
+
+// std::string can be used in constant expressions (C++20, e.g., libstdc++ 12 or better).
+#if !defined(SIMDJSON_SUPPORTS_CONSTEXPR_STRING)
+#if defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#define SIMDJSON_SUPPORTS_CONSTEXPR_STRING 1
+#else
+#define SIMDJSON_SUPPORTS_CONSTEXPR_STRING 0
+#endif
+#endif // !defined(SIMDJSON_SUPPORTS_CONSTEXPR_STRING)
+
 // The C++23 fixed-width floating-point types std::float32_t and std::float64_t
 // (<stdfloat>) are available. They are optional even in C++23: a compiler that
 // provides them predefines __STDCPP_FLOAT32_T__ and __STDCPP_FLOAT64_T__.
@@ -237,11 +255,11 @@
 
 
 #if !defined(SIMDJSON_CONSTEVAL)
-#if defined(__cpp_consteval) && __cpp_consteval >= 201811L && defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#if defined(__cpp_consteval) && __cpp_consteval >= 201811L && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
 #define SIMDJSON_CONSTEVAL 1
 #else
 #define SIMDJSON_CONSTEVAL 0
-#endif // defined(__cpp_consteval) && __cpp_consteval >= 201811L && defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#endif // defined(__cpp_consteval) && __cpp_consteval >= 201811L && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
 #endif // !defined(SIMDJSON_CONSTEVAL)
 
 // SIMDJSON_CONSTEXPR_STRING is 'constexpr' when the standard library supports
@@ -249,11 +267,11 @@
 // lets functions that build a std::string be constant expressions when possible
 // while still compiling against older standard libraries.
 #if !defined(SIMDJSON_CONSTEXPR_STRING)
-#if defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#if SIMDJSON_SUPPORTS_CONSTEXPR_STRING
 #define SIMDJSON_CONSTEXPR_STRING constexpr
 #else
 #define SIMDJSON_CONSTEXPR_STRING
-#endif // defined(__cpp_lib_constexpr_string) && __cpp_lib_constexpr_string >= 201907L
+#endif // SIMDJSON_SUPPORTS_CONSTEXPR_STRING
 #endif // !defined(SIMDJSON_CONSTEXPR_STRING)
 #endif // SIMDJSON_COMPILER_CHECK_H
 /* end file simdjson/compiler_check.h */
@@ -329,7 +347,25 @@ using std::size_t;
   #define SIMDJSON_IS_LSX 1
 
 // Adjust for runtime dispatching support.
-#if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER) && !defined(__NVCOMPILER)
+//
+// LASX runtime dispatching is deliberately disabled by default, so that the
+// LSX kernel is used even when the processor supports LASX. On a Loongson
+// 3A6000, our LASX kernel parses about 5% slower overall than our LSX
+// kernel (stage 1 about 14% slower), with both GCC 15 and LLVM. The 256-bit
+// registers do not help: stage 1 is limited by moving bitmasks from vector
+// registers to general-purpose registers, and with LASX each bitmask needs
+// a cross-lane permutation (3 cycles) and a slower vector-to-GPR move
+// (xvpickve2gr is 2 cycles slower than vpickve2gr).
+//
+// Define SIMDJSON_DISABLE_LASX_RUNTIME_DISPATCH to 0 to enable LASX runtime
+// dispatching (GCC 15+ or LLVM). Compiling with -mlasx selects the LASX
+// kernel regardless of this macro. See doc/implementation-selection.md.
+#ifndef SIMDJSON_DISABLE_LASX_RUNTIME_DISPATCH
+  #define SIMDJSON_DISABLE_LASX_RUNTIME_DISPATCH 1
+#endif
+#if SIMDJSON_DISABLE_LASX_RUNTIME_DISPATCH
+  #define SIMDJSON_IMPLEMENTATION_LASX 0
+#elif defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER) && !defined(__NVCOMPILER)
 #if __GNUC__ > 15 || (__GNUC__ == 15 && __GNUC_MINOR__ >= 0)
   // We are ok, we will support runtime dispatch for LASX.
 #else
@@ -338,13 +374,14 @@ using std::size_t;
   // Loongson users should update to GCC 15 or better.
   #define SIMDJSON_IMPLEMENTATION_LASX 0
 #endif
+#elif defined(__clang__)
+  // LLVM supports runtime dispatch for LASX through the target attribute.
+  // See simdjson/lasx/intrinsics.h.
 #else
-  // We are not using GCC, so we assume that we can support runtime dispatch for LASX.
+  // We are not using GCC or LLVM, so we do not support runtime dispatch for LASX.
   // https://godbolt.org/z/jcMnrjYhs
   #define SIMDJSON_IMPLEMENTATION_LASX 0
 #endif
-
-
 
 #endif
 #elif defined(__PPC64__) || defined(_M_PPC64)
@@ -2715,7 +2752,7 @@ namespace std {
 #define SIMDJSON_SIMDJSON_VERSION_H
 
 /** The version of simdjson being used (major.minor.revision) */
-#define SIMDJSON_VERSION "5.1.1"
+#define SIMDJSON_VERSION "5.2.0"
 
 namespace simdjson {
 enum {
@@ -2726,11 +2763,11 @@ enum {
   /**
    * The minor version (major.MINOR.revision) of simdjson being used.
    */
-  SIMDJSON_VERSION_MINOR = 1,
+  SIMDJSON_VERSION_MINOR = 2,
   /**
    * The revision (major.minor.REVISION) of simdjson being used.
    */
-  SIMDJSON_VERSION_REVISION = 1
+  SIMDJSON_VERSION_REVISION = 0
 };
 } // namespace simdjson
 
@@ -3202,10 +3239,25 @@ template <typename T>
 concept string_view_like = std::is_convertible_v<T, std::string_view> &&
                            !std::is_convertible_v<T, const char*>;
 
+template <typename T>
+concept optional_type = requires(std::remove_cvref_t<T> obj) {
+  typename std::remove_cvref_t<T>::value_type;
+  { obj.value() } -> std::same_as<typename std::remove_cvref_t<T>::value_type&>;
+  requires requires(typename std::remove_cvref_t<T>::value_type &&val) {
+    obj.emplace(std::move(val));
+    {
+      obj.value_or(val)
+    } -> std::convertible_to<typename std::remove_cvref_t<T>::value_type>;
+  };
+  { static_cast<bool>(obj) } -> std::same_as<bool>; // convertible to bool
+  { obj.reset() } noexcept -> std::same_as<void>;
+};
+
 template<typename T>
 concept constructible_from_string_view = std::is_constructible_v<T, std::string_view>
                                         && !std::is_same_v<T, std::string_view>
-                                        && std::is_default_constructible_v<T>;
+                                        && std::is_default_constructible_v<T>
+                                        && !optional_type<T>;
 
 #if SIMDJSON_SUPPORTS_CHAR8_T
 /**
@@ -3217,7 +3269,8 @@ template<typename T>
 concept constructible_from_u8string_view = std::is_constructible_v<T, std::u8string_view>
                                         && !std::is_same_v<T, std::u8string_view>
                                         && !std::is_constructible_v<T, std::string_view>
-                                        && std::is_default_constructible_v<T>;
+                                        && std::is_default_constructible_v<T>
+                                        && !optional_type<T>;
 #endif // SIMDJSON_SUPPORTS_CHAR8_T
 
 template<typename M>
@@ -3286,22 +3339,6 @@ concept smart_pointer = requires(std::remove_cvref_t<T> ptr) {
   // Check if T can be dereferenced
   { *ptr } -> std::same_as<typename std::remove_cvref_t<T>::element_type &>;
 };
-
-template <typename T>
-concept optional_type = requires(std::remove_cvref_t<T> obj) {
-  typename std::remove_cvref_t<T>::value_type;
-  { obj.value() } -> std::same_as<typename std::remove_cvref_t<T>::value_type&>;
-  requires requires(typename std::remove_cvref_t<T>::value_type &&val) {
-    obj.emplace(std::move(val));
-    {
-      obj.value_or(val)
-    } -> std::convertible_to<typename std::remove_cvref_t<T>::value_type>;
-  };
-  { static_cast<bool>(obj) } -> std::same_as<bool>; // convertible to bool
-  { obj.reset() } noexcept -> std::same_as<void>;
-};
-
-
 
 // Types we serialize as JSON strings (not as containers)
 template <typename T>
@@ -5052,6 +5089,11 @@ inline padded_string_view pad_with_reserve(std::string& s) noexcept;
  * is longer than block_size; skip it and continue. With block_size larger than
  * the longest document, no slice is ever empty.
  *
+ * Cost: a slice searches its own block for its start, and then from the end of
+ * its block to the next delimiter. An empty slice returns after searching its
+ * block alone. Cutting the whole input therefore scans each byte about twice,
+ * whatever the document lengths.
+ *
  * @param data       The padded input.
  * @param delimiter  The byte that separates documents.
  * @param block_size The nominal slice size, before snapping.
@@ -5266,14 +5308,30 @@ inline padded_string_view slice_at(padded_string_view data, char delimiter,
   const size_t raw_begin = index * block_size;
   if (raw_begin >= data.size()) { return {}; }
 
-  auto snap = [&](size_t want) -> size_t {
-    if (want >= data.size()) { return data.size(); }
-    const void *p = std::memchr(data.data() + want, delimiter, data.size() - want);
-    return p ? size_t(static_cast<const char *>(p) - data.data()) + 1 : data.size();
+  auto find = [&](size_t from, size_t to) -> const char * {
+    return static_cast<const char *>(
+        std::memchr(data.data() + from, delimiter, to - from));
   };
 
-  const size_t begin = (raw_begin == 0) ? 0 : snap(raw_begin);
-  const size_t end = snap(raw_begin + block_size);
+  // The slice begins just past the first delimiter in its own block. If the
+  // block holds no delimiter, it lies inside a document that an earlier slice
+  // owns, and the slice is empty. Searching past the block would give the same
+  // answer, but would make every block inside a long document scan to that
+  // document's end: quadratic time in the document's length.
+  size_t begin = 0;
+  if (raw_begin != 0) {
+    const size_t block_end = (data.size() - raw_begin > block_size)
+                                 ? raw_begin + block_size : data.size();
+    const char *p = find(raw_begin, block_end);
+    if (p == nullptr) { return {}; }
+    begin = size_t(p - data.data()) + 1;
+  }
+  // Only the slice that owns a document scans to its end.
+  size_t end = data.size();
+  if (data.size() - raw_begin > block_size) {
+    const char *p = find(raw_begin + block_size, data.size());
+    if (p != nullptr) { end = size_t(p - data.data()) + 1; }
+  }
   if (begin >= end) { return {}; }
   return padded_string_view(data.data() + begin, end - begin,
                             data.capacity() - begin);
@@ -6037,7 +6095,7 @@ public:
     inline bool operator>=(const iterator& other) const noexcept;
     inline bool operator>(const iterator& other) const noexcept;
 
-    iterator() noexcept = default;
+    simdjson_inline iterator() noexcept {}
     iterator(const iterator&) noexcept = default;
     iterator& operator=(const iterator&) noexcept = default;
   private:
@@ -6065,7 +6123,7 @@ public:
     inline bool operator==(const reverse_iterator& other) const noexcept;
     inline bool operator!=(const reverse_iterator& other) const noexcept;
 
-    reverse_iterator() noexcept = default;
+    simdjson_inline reverse_iterator() noexcept {}
     reverse_iterator(const reverse_iterator&) noexcept = default;
     reverse_iterator& operator=(const reverse_iterator&) noexcept = default;
   private:
@@ -6283,7 +6341,7 @@ public:
    *
    * The parser will allocate capacity as needed.
    */
-  document() noexcept = default;
+  simdjson_inline document() noexcept {}
   ~document() noexcept = default;
 
   /**
@@ -7135,7 +7193,7 @@ namespace dom {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -7858,7 +7916,7 @@ public:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    *         - INCORRECT_TYPE if this is not an object
    */
-  inline simdjson_result<element> operator[](std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<element> operator[](std::string_view key) const noexcept;
 
   /**
    * Get the value associated with the given key.
@@ -7873,7 +7931,7 @@ public:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    *         - INCORRECT_TYPE if this is not an object
    */
-  inline simdjson_result<element> operator[](const char *key) const noexcept;
+  simdjson_inline simdjson_result<element> operator[](const char *key) const noexcept;
   simdjson_result<element> operator[](int) const noexcept = delete;
 
 
@@ -7963,7 +8021,7 @@ public:
    * @return The value associated with this field, or:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    */
-  inline simdjson_result<element> at_key(std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<element> at_key(std::string_view key) const noexcept;
 
   /**
    * Get the value associated with the given key in a case-insensitive manner.
@@ -8153,7 +8211,7 @@ public:
      * Returns true if the key in this key/value pair is equal
      * to the provided string_view.
      */
-    inline bool key_equals(std::string_view o) const noexcept;
+    simdjson_inline bool key_equals(std::string_view o) const noexcept;
     /**
      * Returns true if the key in this key/value pair is equal
      * to the provided string_view in a case-insensitive manner.
@@ -8169,7 +8227,7 @@ public:
      */
     inline element value() const noexcept;
 
-    iterator() noexcept = default;
+    simdjson_inline iterator() noexcept {}
     iterator(const iterator&) noexcept = default;
     iterator& operator=(const iterator&) noexcept = default;
   private:
@@ -8213,7 +8271,7 @@ public:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    *         - INCORRECT_TYPE if this is not an object
    */
-  inline simdjson_result<element> operator[](std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<element> operator[](std::string_view key) const noexcept;
 
   /**
    * Get the value associated with the given key.
@@ -8230,7 +8288,7 @@ public:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    *         - INCORRECT_TYPE if this is not an object
    */
-  inline simdjson_result<element> operator[](const char *key) const noexcept;
+  simdjson_inline simdjson_result<element> operator[](const char *key) const noexcept;
   simdjson_result<element> operator[](int) const noexcept = delete;
 
   /**
@@ -8297,7 +8355,7 @@ public:
    * @return The value associated with this field, or:
    *         - NO_SUCH_FIELD if the field does not exist in the object
    */
-  inline simdjson_result<element> at_key(std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<element> at_key(std::string_view key) const noexcept;
 
   /**
    * Gets the values associated with keys of an object
@@ -8361,13 +8419,13 @@ public:
   simdjson_inline simdjson_result(dom::object value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  inline simdjson_result<dom::element> operator[](std::string_view key) const noexcept;
-  inline simdjson_result<dom::element> operator[](const char *key) const noexcept;
+  simdjson_inline simdjson_result<dom::element> operator[](std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<dom::element> operator[](const char *key) const noexcept;
   simdjson_result<dom::element> operator[](int) const noexcept = delete;
   inline simdjson_result<dom::element> at_pointer(std::string_view json_pointer) const noexcept;
   inline simdjson_result<std::vector<dom::element>> at_path_with_wildcard(std::string_view json_path_new) const noexcept;
   inline simdjson_result<dom::element> at_path(std::string_view json_path) const noexcept;
-  inline simdjson_result<dom::element> at_key(std::string_view key) const noexcept;
+  simdjson_inline simdjson_result<dom::element> at_key(std::string_view key) const noexcept;
   inline std::vector<dom::element>& get_values(std::vector<dom::element>& out) const noexcept;
   inline simdjson_result<dom::element> at_key_case_insensitive(std::string_view key) const noexcept;
 
@@ -8474,7 +8532,7 @@ protected:
   // implementation details (subject to change)
   /** Backing buffer **/
   struct vector_with_small_buffer {
-    vector_with_small_buffer() = default;
+    vector_with_small_buffer() {}
     ~vector_with_small_buffer() { free_buffer(); }
 
     vector_with_small_buffer(const vector_with_small_buffer &) = delete;
@@ -8559,6 +8617,8 @@ protected:
  */
 class mini_formatter : public base_formatter<mini_formatter> {
 public:
+  /** User-provided so that value-initialization does not zero the buffer. **/
+  mini_formatter() {}
   simdjson_inline void print_newline();
 
   simdjson_inline void print_indents(size_t depth);
@@ -8593,7 +8653,7 @@ protected:
 template <class formatter = mini_formatter> class string_builder {
 public:
   /** Construct an initially empty builder, would print the empty string **/
-  string_builder() = default;
+  string_builder() {}
   /** Construct a builder whose formatter uses the given indentation step **/
   explicit string_builder(int indent_step) : format(indent_step) {}
 
@@ -9043,6 +9103,7 @@ simdjson_inline bool is_matching_failure_error(error_code error) noexcept {
  * @return A string containing the equivalent JSON Pointer.
  */
 inline std::string json_path_to_pointer_conversion(std::string_view json_path) {
+  if (json_path == "$") { return {}; }
   size_t i = 0;
   // if JSONPath starts with $, skip it
    // json_path.starts_with('$') requires C++20.
@@ -9065,7 +9126,16 @@ inline std::string json_path_to_pointer_conversion(std::string_view json_path) {
     } else if (json_path[i] == '[') {
       result += '/';
       ++i; // Move past the '['
-      while (i < json_path.length() && json_path[i] != ']') {
+      // A bracket-quoted key (['key'] or ["key"]) is the key without its quotes,
+      // as in get_next_key_and_json_path(). It runs up to the matching quote,
+      // which the ']' must follow.
+      char quote = '\0';
+      if (i < json_path.length() && (json_path[i] == '\'' || json_path[i] == '"')) {
+          quote = json_path[i];
+          ++i;
+      }
+      const char key_end = quote ? quote : ']';
+      while (i < json_path.length() && json_path[i] != key_end) {
           if (json_path[i] == '~') {
             result += "~0";
           } else if (json_path[i] == '/') {
@@ -9074,6 +9144,12 @@ inline std::string json_path_to_pointer_conversion(std::string_view json_path) {
             result += json_path[i];
           }
           ++i;
+      }
+      if (quote) {
+          if (i == json_path.length()) {
+              return "-1"; // missing closing quote
+          }
+          ++i; // Move past the closing quote
       }
       if (i == json_path.length() || json_path[i] != ']') {
           return "-1"; // Using sentinel value that will be handled as an error by the caller.
@@ -9614,7 +9690,8 @@ inline array::iterator array::begin() const noexcept {
 }
 inline array::iterator array::end() const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
-  return internal::tape_ref(tape.doc, tape.after_element() - 1);
+  SIMDJSON_DEVELOPMENT_ASSERT(tape.tape_ref_type() == internal::tape_type::START_ARRAY);
+  return internal::tape_ref(tape.doc, tape.matching_brace_index() - 1);
 }
 inline size_t array::size() const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
@@ -9650,14 +9727,12 @@ inline simdjson_result<element> array::at_pointer(std::string_view json_pointer)
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
 
   // Get the child
-  auto child = array(tape).at(array_index);
+  element child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
+  SIMDJSON_TRY(array(tape).at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -9818,11 +9893,11 @@ simdjson_inline simdjson_result<dom::object>::simdjson_result(dom::object value)
 simdjson_inline simdjson_result<dom::object>::simdjson_result(error_code error) noexcept
     : internal::simdjson_result_base<dom::object>(error) {}
 
-inline simdjson_result<dom::element> simdjson_result<dom::object>::operator[](std::string_view key) const noexcept {
+simdjson_inline simdjson_result<dom::element> simdjson_result<dom::object>::operator[](std::string_view key) const noexcept {
   if (error()) { return error(); }
   return first[key];
 }
-inline simdjson_result<dom::element> simdjson_result<dom::object>::operator[](const char *key) const noexcept {
+simdjson_inline simdjson_result<dom::element> simdjson_result<dom::object>::operator[](const char *key) const noexcept {
   if (error()) { return error(); }
   return first[key];
 }
@@ -9842,7 +9917,7 @@ inline simdjson_result<std::vector<dom::element>> simdjson_result<dom::object>::
   }
   return first.at_path_with_wildcard(json_path);
 }
-inline simdjson_result<dom::element> simdjson_result<dom::object>::at_key(std::string_view key) const noexcept {
+simdjson_inline simdjson_result<dom::element> simdjson_result<dom::object>::at_key(std::string_view key) const noexcept {
   if (error()) { return error(); }
   return first.at_key(key);
 }
@@ -9885,17 +9960,18 @@ inline object::iterator object::begin() const noexcept {
 }
 inline object::iterator object::end() const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
-  return internal::tape_ref(tape.doc, tape.after_element() - 1);
+  SIMDJSON_DEVELOPMENT_ASSERT(tape.tape_ref_type() == internal::tape_type::START_OBJECT);
+  return internal::tape_ref(tape.doc, tape.matching_brace_index() - 1);
 }
 inline size_t object::size() const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
   return tape.scope_count();
 }
 
-inline simdjson_result<element> object::operator[](std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> object::operator[](std::string_view key) const noexcept {
   return at_key(key);
 }
-inline simdjson_result<element> object::operator[](const char *key) const noexcept {
+simdjson_inline simdjson_result<element> object::operator[](const char *key) const noexcept {
   return at_key(key);
 }
 inline simdjson_result<element> object::at_pointer(std::string_view json_pointer) const noexcept {
@@ -9909,7 +9985,8 @@ inline simdjson_result<element> object::at_pointer(std::string_view json_pointer
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<element> child;
+  element child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -9929,16 +10006,16 @@ inline simdjson_result<element> object::at_pointer(std::string_view json_pointer
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = at_key(unescaped);
+    error = at_key(unescaped).get(child);
   } else {
-    child = at_key(key);
+    error = at_key(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -9973,7 +10050,7 @@ inline simdjson_result<std::vector<element>> object::at_path_with_wildcard(std::
   return element(*this).at_path_with_wildcard(json_path);
 }
 
-inline simdjson_result<element> object::at_key(std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> object::at_key(std::string_view key) const noexcept {
   iterator end_field = end();
   for (iterator field = begin(); field != end_field; ++field) {
     if (field.key_equals(key)) {
@@ -10072,7 +10149,7 @@ inline element object::iterator::value() const noexcept {
  * on the long run.
  */
 
-inline bool object::iterator::key_equals(std::string_view o) const noexcept {
+simdjson_inline bool object::iterator::key_equals(std::string_view o) const noexcept {
   // We use the fact that the key length can be computed quickly
   // without access to the string buffer.
   const uint32_t len = key_length();
@@ -10600,10 +10677,10 @@ inline array::iterator element::end() const noexcept(false) {
 
 #endif // SIMDJSON_EXCEPTIONS
 
-inline simdjson_result<element> element::operator[](std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> element::operator[](std::string_view key) const noexcept {
   return at_key(key);
 }
-inline simdjson_result<element> element::operator[](const char *key) const noexcept {
+simdjson_inline simdjson_result<element> element::operator[](const char *key) const noexcept {
   return at_key(key);
 }
 
@@ -10647,6 +10724,7 @@ inline simdjson_result<element> element::at_pointer(std::string_view json_pointe
 
 inline simdjson_result<std::vector<element>> element::at_path_with_wildcard(std::string_view json_path) const noexcept {
   SIMDJSON_DEVELOPMENT_ASSERT(tape.usable()); // https://github.com/simdjson/simdjson/issues/1914
+  if (json_path == "$") { return std::vector<element>{*this}; }
 
   const internal::wildcard_json_path path = internal::parse_wildcard_json_path(json_path);
   // A path that cannot be parsed matches nothing, whatever the document: say
@@ -10680,7 +10758,7 @@ inline simdjson_result<element> element::at(std::string_view json_pointer) const
 inline simdjson_result<element> element::at(size_t index) const noexcept {
   return get<array>().at(index);
 }
-inline simdjson_result<element> element::at_key(std::string_view key) const noexcept {
+simdjson_inline simdjson_result<element> element::at_key(std::string_view key) const noexcept {
   return get<object>().at_key(key);
 }
 inline simdjson_result<element> element::at_key_case_insensitive(std::string_view key) const noexcept {
@@ -11041,6 +11119,7 @@ inline error_code parser::allocate(size_t capacity, size_t max_depth) noexcept {
     err = implementation->allocate(capacity, max_depth);
   } else {
     err = simdjson::get_active_implementation()->create_dom_parser_implementation(capacity, max_depth, implementation);
+    if (err) { implementation.reset(); }
   }
   if (err) { return err; }
   return SUCCESS;
@@ -12145,6 +12224,9 @@ find_next_json_quotable_character_scalar(const std::string_view view,
 template <typename Finder>
 inline size_t write_string_escaped_with(const std::string_view input, char *out) {
   size_t mysize = input.size();
+  if (mysize == 0) {
+    return 0;
+  }
 
   // Use SIMD position finder directly - it returns mysize if no escape needed
   size_t location = Finder::find(input, 0);
@@ -16838,6 +16920,9 @@ namespace {
     simdjson_inline simd8() : simd8(vdupq_n_u8(0)) {}
     // Splat constructor
     simdjson_inline simd8(bool _value) : simd8(splat(_value)) {}
+    // base_u8's operator~ xors with 0xFFu, which simd8<bool> only accepts by
+    // narrowing it to bool (MSVC C4305). Every other kernel overrides it too.
+    simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
 
     // We return uint32_t instead of uint16_t because that seems to be more efficient for most
     // purposes (cutting it down to uint16_t costs performance in some compilers).
@@ -16937,9 +17022,15 @@ namespace {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return ~any_bits_set(bits); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
     simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
@@ -17703,8 +17794,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -17714,11 +17810,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -17769,7 +17868,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -18974,6 +19073,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -19066,6 +19168,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -19348,6 +19453,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -19444,6 +19552,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -20334,8 +20445,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -20345,11 +20461,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -20400,7 +20519,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -21605,6 +21724,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -21697,6 +21819,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -21979,6 +22104,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -22075,6 +22203,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -23435,8 +23566,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -23446,11 +23582,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -23501,7 +23640,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -24706,6 +24845,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -24798,6 +24940,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -25080,6 +25225,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -25176,6 +25324,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -26532,8 +26683,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -26543,11 +26699,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -26598,7 +26757,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -27803,6 +27962,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -27895,6 +28057,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -28177,6 +28342,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -28273,6 +28441,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -29143,7 +29314,7 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline simd8<bool>
   operator<(const simd8<uint8_t> other) const {
-    return this->gt_bits(other).any_bits_set();
+    return this->lt_bits(other).any_bits_set();
   }
 
   // Bit-specific operations
@@ -29171,6 +29342,9 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const {
     return !bits_not_set_anywhere(bits);
+  }
+  simdjson_inline bool is_ascii() const {
+    return this->bits_not_set_anywhere(uint8_t(0x80));
   }
   template <int N> simdjson_inline simd8<uint8_t> shr() const {
     return simd8<uint8_t>(
@@ -29747,8 +29921,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -29758,11 +29937,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -29813,7 +29995,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -31018,6 +31200,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -31110,6 +31295,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -31392,6 +31580,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -31488,6 +31679,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -32293,7 +32487,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -32712,7 +32906,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -33270,8 +33464,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -33281,11 +33480,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -33336,7 +33538,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -34541,6 +34743,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -34633,6 +34838,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -34915,6 +35123,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -35011,6 +35222,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -35321,7 +35535,18 @@ template <typename T> struct simd8x64;
 /* amalgamation skipped (editor-only): #endif // SIMDJSON_CONDITIONAL_INCLUDE */
 
 #include <lsxintrin.h>
+#if defined(__clang__) && !defined(__loongarch_asx)
+// LLVM's lasxintrin.h only declares the LASX types and functions when
+// __loongarch_asx is defined, that is, when the code is compiled with -mlasx.
+// For runtime dispatching, we include it inside a target("lasx") region
+// (see simdjson/lasx/begin.h) where the LASX builtins are available, so we
+// define __loongarch_asx while including the header.
+#define __loongarch_asx 1
 #include <lasxintrin.h>
+#undef __loongarch_asx
+#else
+#include <lasxintrin.h>
+#endif
 
 static_assert(sizeof(__m256i) <= simdjson::SIMDJSON_PADDING, "insufficient padding for LoongArch ASX");
 
@@ -35540,10 +35765,7 @@ namespace simd {
       __m256i mask = __lasx_xvmskltz_b(*this);
       return (__lasx_xvpickve2gr_w(mask, 4) << 16) | (__lasx_xvpickve2gr_w(mask, 0));
     }
-   simdjson_inline bool any() const {
-      __m256i v = __lasx_xvmsknz_b(*this);
-      return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
-    }
+    simdjson_inline bool any() const { return !__lasx_xbz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -36309,8 +36531,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -36320,11 +36547,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -36375,7 +36605,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -37580,6 +37810,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -37672,6 +37905,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -37954,6 +38190,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -38050,6 +38289,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -38570,7 +38812,7 @@ namespace simd {
     simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     simdjson_inline int to_bitmask() const { return __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
-    simdjson_inline bool any() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
+    simdjson_inline bool any() const { return !__lsx_bz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -39326,8 +39568,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -39337,11 +39584,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -39392,7 +39642,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -40597,6 +40847,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -40689,6 +40942,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -40971,6 +41227,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -41067,6 +41326,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -41554,7 +41816,9 @@ namespace simd {
     simdjson_inline simd8<bool> operator|(const simd8<bool> other) const {  return __riscv_vmor(*this, other, VL8); }
     simdjson_inline simd8<bool> operator&(const simd8<bool> other) const {  return __riscv_vmand(*this, other, VL8); }
     simdjson_inline simd8<bool> operator^(const simd8<bool> other) const {  return __riscv_vmxor(*this, other, VL8); }
-    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(other, *this, VL8); }
+    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(*this, other, VL8); }
+    simdjson_inline simd8<bool> operator==(const simd8<bool> other) const { return __riscv_vmxnor(*this, other, VL8); }
+    simdjson_inline bool any() const { return __riscv_vfirst(value, VL8) >= 0; }
     simdjson_inline simd8<bool> operator~() const { return __riscv_vmnot(*this, VL8); }
     simdjson_inline simd8<bool>& operator|=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast | other; return *this_cast; }
     simdjson_inline simd8<bool>& operator&=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast & other; return *this_cast; }
@@ -41606,9 +41870,9 @@ namespace simd {
     simdjson_inline simd8<uint8_t> operator^(const simd8<uint8_t> other) const { return  __riscv_vxor_vv_u8m1( value, other, VL8); }
     simdjson_inline simd8<uint8_t> operator~() const { return __riscv_vnot_v_u8m1(value, VL8); }
 #if __riscv_zvbb
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(other, value, VL8); }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(value, other, VL8); }
 #else
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return other & ~*this; }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return *this & ~other; }
 #endif
     simdjson_inline simd8<uint8_t>& operator|=(const simd8<uint8_t> other) { value = *this | other; return *this; }
     simdjson_inline simd8<uint8_t>& operator&=(const simd8<uint8_t> other) { value = *this & other; return *this; }
@@ -41636,6 +41900,8 @@ namespace simd {
     simdjson_inline simd8<uint8_t>& operator-=(const simd8<uint8_t> other) { value = *this - other; return *this; }
 
     // Order-specific operations
+    simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __riscv_vmaxu(value, other, VL8); }
+    simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __riscv_vminu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return __riscv_vmsleu(value, other, VL8); }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return __riscv_vmsgeu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const  { return __riscv_vmsltu(value, other, VL8); }
@@ -41647,10 +41913,17 @@ namespace simd {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const {
       return __riscv_vfirst(__riscv_vmsne(value, 0, VL8), VL8) >= 0;
     }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return __riscv_vsrl(value, N, VL8); }
     template<int N>
@@ -42366,8 +42639,13 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
   }
   size_t max_structures = rounded_capacity + 9;
   if(max_structures > SIZE_MAX / sizeof(uint32_t)) { return CAPACITY; }
-  structural_indexes.reset( new (std::nothrow) uint32_t[max_structures] );
-  if (!structural_indexes) { _capacity = 0; return MEMALLOC; }
+  // Allocate before releasing the current buffer so that, on failure, the
+  // implementation keeps its previous buffer and capacity. Otherwise a parser
+  // that still believes it has room skips reallocation and stage 1 rejects
+  // every document with CAPACITY.
+  std::unique_ptr<uint32_t[]> new_structural_indexes(new (std::nothrow) uint32_t[max_structures]);
+  if (!new_structural_indexes) { return MEMALLOC; }
+  structural_indexes = std::move(new_structural_indexes);
   structural_indexes[0] = 0;
   n_structural_indexes = 0;
 
@@ -42377,11 +42655,14 @@ inline simdjson_warn_unused error_code dom_parser_implementation::set_capacity(s
 
 inline simdjson_warn_unused error_code dom_parser_implementation::set_max_depth(size_t max_depth) noexcept {
   if(max_depth == 0 || max_depth > SIMDJSON_MAX_DEPTH || max_depth > SIZE_MAX / sizeof(open_container)) { return CAPACITY; }
-  // Stage 2 stacks
-  open_containers.reset(new (std::nothrow) open_container[max_depth]);
-  is_array.reset(new (std::nothrow) bool[max_depth]);
-  if (!is_array || !open_containers) { _max_depth = 0; return MEMALLOC; }
-
+  // Stage 2 stacks. Allocate both before touching the parser so that, on
+  // failure, it keeps its previous stacks and depth: a parser whose depth does
+  // not match its stacks would crash in stage 2.
+  std::unique_ptr<open_container[]> new_open_containers(new (std::nothrow) open_container[max_depth]);
+  std::unique_ptr<bool[]> new_is_array(new (std::nothrow) bool[max_depth]);
+  if (!new_is_array || !new_open_containers) { return MEMALLOC; }
+  open_containers = std::move(new_open_containers);
+  is_array = std::move(new_is_array);
   _max_depth = max_depth;
   return SUCCESS;
 }
@@ -42432,7 +42713,7 @@ struct implementation_simdjson_result_base {
   /**
    * Create a new empty result with error = UNINITIALIZED.
    */
-  simdjson_inline implementation_simdjson_result_base() noexcept = default;
+  simdjson_inline implementation_simdjson_result_base() noexcept {}
 
   /**
    * Create a new error result.
@@ -43637,6 +43918,9 @@ simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned(const u
 }
 // Parse any number from 0 to 18,446,744,073,709,551,615
 simdjson_unused simdjson_inline simdjson_result<uint64_t> parse_unsigned_in_string(const uint8_t * const src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   const uint8_t *p = src + 1;
   //
   // Parse the integer part.
@@ -43729,6 +44013,9 @@ simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer(const uin
 
 // Parse any number from  -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807
 simdjson_unused simdjson_inline simdjson_result<int64_t> parse_integer_in_string(const uint8_t *src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -44011,6 +44298,9 @@ simdjson_unused simdjson_inline simdjson_result<number_type> get_number_type(con
 }
 
 simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -44107,6 +44397,9 @@ simdjson_unused simdjson_inline simdjson_result<double> parse_double_in_string(c
 // Parse a JSON number held inside a JSON string into a binary32 (float) value.
 // See parse_float for why we do not simply round parse_double_in_string.
 simdjson_unused simdjson_inline simdjson_result<float> parse_float_in_string(const uint8_t * src) noexcept {
+  // The number must be inside a string: anything else (a bare number, an
+  // array, an object...) is not the requested type.
+  if (*src != '"') { return INCORRECT_TYPE; }
   //
   // Check for minus sign
   //
@@ -45163,6 +45456,9 @@ namespace {
     simdjson_inline simd8() : simd8(vdupq_n_u8(0)) {}
     // Splat constructor
     simdjson_inline simd8(bool _value) : simd8(splat(_value)) {}
+    // base_u8's operator~ xors with 0xFFu, which simd8<bool> only accepts by
+    // narrowing it to bool (MSVC C4305). Every other kernel overrides it too.
+    simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
 
     // We return uint32_t instead of uint16_t because that seems to be more efficient for most
     // purposes (cutting it down to uint16_t costs performance in some compilers).
@@ -45262,9 +45558,15 @@ namespace {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return ~any_bits_set(bits); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
     simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
@@ -45855,7 +46157,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -47375,14 +47693,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -47481,8 +47799,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -48148,7 +48473,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -49668,14 +50009,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -49774,8 +50115,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -50911,7 +51259,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -52431,14 +52795,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -52537,8 +52901,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -53670,7 +54041,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -55190,14 +55577,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -55296,8 +55683,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -56116,7 +56510,7 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline simd8<bool>
   operator<(const simd8<uint8_t> other) const {
-    return this->gt_bits(other).any_bits_set();
+    return this->lt_bits(other).any_bits_set();
   }
 
   // Bit-specific operations
@@ -56144,6 +56538,9 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const {
     return !bits_not_set_anywhere(bits);
+  }
+  simdjson_inline bool is_ascii() const {
+    return this->bits_not_set_anywhere(uint8_t(0x80));
   }
   template <int N> simdjson_inline simd8<uint8_t> shr() const {
     return simd8<uint8_t>(
@@ -56547,7 +56944,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -58067,14 +58480,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -58173,8 +58586,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -58928,7 +59348,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -59347,7 +59767,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -59732,7 +60152,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -61252,14 +61688,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -61358,8 +61794,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -61824,7 +62267,7 @@ namespace simd {
     simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     simdjson_inline int to_bitmask() const { return __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
-    simdjson_inline bool any() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
+    simdjson_inline bool any() const { return !__lsx_bz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -62407,7 +62850,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -63927,14 +64386,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -64033,8 +64492,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -64290,7 +64756,18 @@ template <typename T> struct simd8x64;
 /* amalgamation skipped (editor-only): #endif // SIMDJSON_CONDITIONAL_INCLUDE */
 
 #include <lsxintrin.h>
+#if defined(__clang__) && !defined(__loongarch_asx)
+// LLVM's lasxintrin.h only declares the LASX types and functions when
+// __loongarch_asx is defined, that is, when the code is compiled with -mlasx.
+// For runtime dispatching, we include it inside a target("lasx") region
+// (see simdjson/lasx/begin.h) where the LASX builtins are available, so we
+// define __loongarch_asx while including the header.
+#define __loongarch_asx 1
 #include <lasxintrin.h>
+#undef __loongarch_asx
+#else
+#include <lasxintrin.h>
+#endif
 
 static_assert(sizeof(__m256i) <= simdjson::SIMDJSON_PADDING, "insufficient padding for LoongArch ASX");
 
@@ -64509,10 +64986,7 @@ namespace simd {
       __m256i mask = __lasx_xvmskltz_b(*this);
       return (__lasx_xvpickve2gr_w(mask, 4) << 16) | (__lasx_xvpickve2gr_w(mask, 0));
     }
-   simdjson_inline bool any() const {
-      __m256i v = __lasx_xvmsknz_b(*this);
-      return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
-    }
+    simdjson_inline bool any() const { return !__lasx_xbz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -65105,7 +65579,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -66625,14 +67115,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -66731,8 +67221,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -67174,7 +67671,9 @@ namespace simd {
     simdjson_inline simd8<bool> operator|(const simd8<bool> other) const {  return __riscv_vmor(*this, other, VL8); }
     simdjson_inline simd8<bool> operator&(const simd8<bool> other) const {  return __riscv_vmand(*this, other, VL8); }
     simdjson_inline simd8<bool> operator^(const simd8<bool> other) const {  return __riscv_vmxor(*this, other, VL8); }
-    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(other, *this, VL8); }
+    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(*this, other, VL8); }
+    simdjson_inline simd8<bool> operator==(const simd8<bool> other) const { return __riscv_vmxnor(*this, other, VL8); }
+    simdjson_inline bool any() const { return __riscv_vfirst(value, VL8) >= 0; }
     simdjson_inline simd8<bool> operator~() const { return __riscv_vmnot(*this, VL8); }
     simdjson_inline simd8<bool>& operator|=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast | other; return *this_cast; }
     simdjson_inline simd8<bool>& operator&=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast & other; return *this_cast; }
@@ -67226,9 +67725,9 @@ namespace simd {
     simdjson_inline simd8<uint8_t> operator^(const simd8<uint8_t> other) const { return  __riscv_vxor_vv_u8m1( value, other, VL8); }
     simdjson_inline simd8<uint8_t> operator~() const { return __riscv_vnot_v_u8m1(value, VL8); }
 #if __riscv_zvbb
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(other, value, VL8); }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(value, other, VL8); }
 #else
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return other & ~*this; }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return *this & ~other; }
 #endif
     simdjson_inline simd8<uint8_t>& operator|=(const simd8<uint8_t> other) { value = *this | other; return *this; }
     simdjson_inline simd8<uint8_t>& operator&=(const simd8<uint8_t> other) { value = *this & other; return *this; }
@@ -67256,6 +67755,8 @@ namespace simd {
     simdjson_inline simd8<uint8_t>& operator-=(const simd8<uint8_t> other) { value = *this - other; return *this; }
 
     // Order-specific operations
+    simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __riscv_vmaxu(value, other, VL8); }
+    simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __riscv_vminu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return __riscv_vmsleu(value, other, VL8); }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return __riscv_vmsgeu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const  { return __riscv_vmsltu(value, other, VL8); }
@@ -67267,10 +67768,17 @@ namespace simd {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const {
       return __riscv_vfirst(__riscv_vmsne(value, 0, VL8), VL8) >= 0;
     }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return __riscv_vsrl(value, N, VL8); }
     template<int N>
@@ -67813,7 +68321,23 @@ requires (!std::is_convertible<R, std::string_view>::value && !concepts::optiona
    * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
    * Use validate_unicode() to check the content if needed.
    */
-  simdjson_inline operator std::string() const noexcept(false);
+  simdjson_inline operator std::string() const & noexcept(false);
+
+  /**
+   * Moves the written JSON buffer out of the builder into an std::string,
+   * see move_to(). The builder is left empty and can be reused.
+   * Throws if memory allocation failed.
+   *
+   * Used for copy-initialization from an rvalue, e.g.
+   * `std::string s = std::move(builder);`, and for `return builder;` from a
+   * function returning std::string (implicit move, C++20 or as an extension).
+   * Direct-initialization, `std::string s(std::move(builder));`, may copy
+   * through operator std::string_view() instead, depending on the compiler.
+   *
+   * The result may not be valid UTF-8 if some of your content was not valid UTF-8.
+   * Use validate_unicode() to check the content if needed.
+   */
+  inline operator std::string() && noexcept(false);
 
   /**
    * Creates an std::string_view from the written JSON buffer.
@@ -69333,14 +69857,14 @@ simdjson_inline void string_builder::append_raw(const char *c) noexcept {
 
 simdjson_inline void
 string_builder::append_raw(std::string_view input) noexcept {
-  if (capacity_check(input.size())) {
-    std::memcpy(buffer_data() + position, input.data(), input.size());
-    position += input.size();
-  }
+  append_raw(input.data(), input.size());
 }
 
 simdjson_inline void string_builder::append_raw(const char *str,
                                                 size_t len) noexcept {
+  if (len == 0) {
+    return;
+  }
   if (capacity_check(len)) {
     std::memcpy(buffer_data() + position, str, len);
     position += len;
@@ -69439,8 +69963,15 @@ simdjson_inline void string_builder::append(const R &range) noexcept {
 #endif
 
 #if SIMDJSON_EXCEPTIONS
-simdjson_inline string_builder::operator std::string() const noexcept(false) {
+simdjson_inline string_builder::operator std::string() const & noexcept(false) {
   return std::string(operator std::string_view());
+}
+
+inline string_builder::operator std::string() && noexcept(false) {
+  std::string out;
+  error_code error = move_to(out);
+  if (error) { throw simdjson_error(error); }
+  return out;
 }
 
 simdjson_inline string_builder::operator std::string_view() const
@@ -70110,6 +70641,9 @@ namespace {
     simdjson_inline simd8() : simd8(vdupq_n_u8(0)) {}
     // Splat constructor
     simdjson_inline simd8(bool _value) : simd8(splat(_value)) {}
+    // base_u8's operator~ xors with 0xFFu, which simd8<bool> only accepts by
+    // narrowing it to bool (MSVC C4305). Every other kernel overrides it too.
+    simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
 
     // We return uint32_t instead of uint16_t because that seems to be more efficient for most
     // purposes (cutting it down to uint16_t costs performance in some compilers).
@@ -70209,9 +70743,15 @@ namespace {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return ~any_bits_set(bits); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
     simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return vtstq_u8(*this, bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const { return vmaxvq_u32(vreinterpretq_u32_u8(*this)) != 0; }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return vshrq_n_u8(*this, N); }
     template<int N>
@@ -70762,7 +71302,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -70770,6 +71318,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -71088,6 +71645,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -71231,7 +71794,7 @@ struct simdjson_result<arm64::ondemand::value_iterator> : public arm64::implemen
 public:
   simdjson_inline simdjson_result(arm64::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -72139,7 +72702,7 @@ struct simdjson_result<arm64::ondemand::value> : public arm64::implementation_si
 public:
   simdjson_inline simdjson_result(arm64::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<arm64::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<arm64::ondemand::object> get_object() noexcept;
@@ -72412,7 +72975,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -72538,7 +73101,7 @@ struct simdjson_result<arm64::ondemand::token_iterator> : public arm64::implemen
 public:
   simdjson_inline simdjson_result(arm64::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -72615,7 +73178,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -72624,6 +73187,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -72640,6 +73219,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -72819,6 +73404,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -72891,7 +73482,7 @@ public:
   simdjson_inline simdjson_result(arm64::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -73054,7 +73645,7 @@ struct simdjson_result<arm64::ondemand::json_type> : public arm64::implementatio
 public:
   simdjson_inline simdjson_result(arm64::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -73106,7 +73697,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -73223,6 +73814,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -73261,6 +73866,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -73287,7 +73893,7 @@ struct simdjson_result<arm64::ondemand::raw_json_string> : public arm64::impleme
 public:
   simdjson_inline simdjson_result(arm64::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -73749,6 +74355,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -73756,6 +74366,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -73776,7 +74390,7 @@ struct simdjson_result<arm64::ondemand::parser> : public arm64::implementation_s
 public:
   simdjson_inline simdjson_result(arm64::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -73812,7 +74426,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -74059,7 +74673,7 @@ struct simdjson_result<arm64::ondemand::array> : public arm64::implementation_si
 public:
   simdjson_inline simdjson_result(arm64::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<arm64::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<arm64::ondemand::array_iterator> begin() && noexcept;
@@ -74140,7 +74754,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -74198,6 +74812,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -74222,7 +74837,7 @@ struct simdjson_result<arm64::ondemand::array_iterator> : public arm64::implemen
 
   simdjson_inline simdjson_result(arm64::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -74272,7 +74887,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -75395,7 +76010,7 @@ struct simdjson_result<arm64::ondemand::document> : public arm64::implementation
 public:
   simdjson_inline simdjson_result(arm64::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<arm64::ondemand::array> get_array() & noexcept;
@@ -75525,7 +76140,7 @@ template<>
 struct simdjson_result<arm64::ondemand::document_reference> : public arm64::implementation_simdjson_result_base<arm64::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(arm64::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<arm64::ondemand::array> get_array() & noexcept;
@@ -75672,7 +76287,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -76022,7 +76637,7 @@ struct simdjson_result<arm64::ondemand::document_stream> : public arm64::impleme
 public:
   simdjson_inline simdjson_result(arm64::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -76150,7 +76765,7 @@ struct simdjson_result<arm64::ondemand::field> : public arm64::implementation_si
 public:
   simdjson_inline simdjson_result(arm64::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -77694,7 +78309,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -77716,7 +78331,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -78164,7 +78779,7 @@ struct simdjson_result<arm64::ondemand::object> : public arm64::implementation_s
 public:
   simdjson_inline simdjson_result(arm64::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<arm64::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<arm64::ondemand::object_iterator> begin() && noexcept;
@@ -78283,7 +78898,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -78324,6 +78939,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -78341,7 +78957,7 @@ struct simdjson_result<arm64::ondemand::object_iterator> : public arm64::impleme
 public:
   simdjson_inline simdjson_result(arm64::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -78400,7 +79016,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -78444,7 +79060,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -78472,7 +79088,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -78500,7 +79116,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -78762,6 +79378,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -78815,6 +79435,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -78832,7 +79462,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   arm64::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, arm64::ondemand::array>) {
     arr = val;
@@ -78912,35 +79542,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, arm64::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- arm64::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, arm64::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  arm64::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, arm64::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -78955,27 +79572,6 @@ error_code tag_invoke(deserialize_tag, arm64::ondemand::object &obj, T &out) noe
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, arm64::ondemand::value &val, T &out) noexcept(false) {
-  arm64::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, arm64::ondemand::document &doc, T &out) noexcept(false) {
-  arm64::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, arm64::ondemand::document_reference &doc, T &out) noexcept(false) {
-  arm64::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -79000,7 +79596,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -79023,9 +79619,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -79035,10 +79639,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -79060,6 +79676,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -79828,15 +80446,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -80016,12 +80631,12 @@ namespace arm64 {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -80034,7 +80649,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -80047,6 +80663,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -80056,7 +80673,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -80067,6 +80685,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -80094,8 +80713,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -80550,6 +81170,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -80569,6 +81190,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -81364,6 +81990,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -81391,7 +82025,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -81418,6 +82052,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -82749,6 +83389,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -82767,7 +83478,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -82781,7 +83493,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -82998,10 +83711,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -83233,61 +83946,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -83337,6 +84043,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -83360,6 +84176,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -83380,6 +84210,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -83535,6 +84371,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -84136,7 +85012,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -84294,7 +85170,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -84314,16 +85191,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -84683,7 +85560,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -84696,6 +85574,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -84705,7 +85584,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -84716,6 +85596,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -84730,6 +85611,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -84755,7 +85637,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -85015,25 +85897,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -85080,7 +85974,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -85350,7 +86277,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -85370,7 +86297,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -85400,6 +86327,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -85703,13 +86664,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -85769,8 +86739,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -85822,7 +86806,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -85831,8 +86815,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -85840,14 +86822,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -85855,9 +86830,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -85937,7 +86912,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -85964,8 +86939,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -85974,14 +86947,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -85989,9 +86955,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -86014,8 +86980,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -86024,14 +86988,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -86039,9 +86996,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -86086,6 +87043,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -86176,6 +87141,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -86199,15 +87169,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -86218,8 +87182,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -86368,15 +87331,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -86578,6 +87535,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -86637,6 +87611,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -86700,6 +87681,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -86816,7 +87803,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -88255,7 +89247,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -88263,6 +89263,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -88581,6 +89590,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -88724,7 +89739,7 @@ struct simdjson_result<fallback::ondemand::value_iterator> : public fallback::im
 public:
   simdjson_inline simdjson_result(fallback::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -89632,7 +90647,7 @@ struct simdjson_result<fallback::ondemand::value> : public fallback::implementat
 public:
   simdjson_inline simdjson_result(fallback::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<fallback::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<fallback::ondemand::object> get_object() noexcept;
@@ -89905,7 +90920,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -90031,7 +91046,7 @@ struct simdjson_result<fallback::ondemand::token_iterator> : public fallback::im
 public:
   simdjson_inline simdjson_result(fallback::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -90108,7 +91123,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -90117,6 +91132,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -90133,6 +91164,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -90312,6 +91349,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -90384,7 +91427,7 @@ public:
   simdjson_inline simdjson_result(fallback::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -90547,7 +91590,7 @@ struct simdjson_result<fallback::ondemand::json_type> : public fallback::impleme
 public:
   simdjson_inline simdjson_result(fallback::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -90599,7 +91642,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -90716,6 +91759,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -90754,6 +91811,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -90780,7 +91838,7 @@ struct simdjson_result<fallback::ondemand::raw_json_string> : public fallback::i
 public:
   simdjson_inline simdjson_result(fallback::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -91242,6 +92300,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -91249,6 +92311,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -91269,7 +92335,7 @@ struct simdjson_result<fallback::ondemand::parser> : public fallback::implementa
 public:
   simdjson_inline simdjson_result(fallback::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -91305,7 +92371,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -91552,7 +92618,7 @@ struct simdjson_result<fallback::ondemand::array> : public fallback::implementat
 public:
   simdjson_inline simdjson_result(fallback::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<fallback::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<fallback::ondemand::array_iterator> begin() && noexcept;
@@ -91633,7 +92699,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -91691,6 +92757,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -91715,7 +92782,7 @@ struct simdjson_result<fallback::ondemand::array_iterator> : public fallback::im
 
   simdjson_inline simdjson_result(fallback::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -91765,7 +92832,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -92888,7 +93955,7 @@ struct simdjson_result<fallback::ondemand::document> : public fallback::implemen
 public:
   simdjson_inline simdjson_result(fallback::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<fallback::ondemand::array> get_array() & noexcept;
@@ -93018,7 +94085,7 @@ template<>
 struct simdjson_result<fallback::ondemand::document_reference> : public fallback::implementation_simdjson_result_base<fallback::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(fallback::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<fallback::ondemand::array> get_array() & noexcept;
@@ -93165,7 +94232,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -93515,7 +94582,7 @@ struct simdjson_result<fallback::ondemand::document_stream> : public fallback::i
 public:
   simdjson_inline simdjson_result(fallback::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -93643,7 +94710,7 @@ struct simdjson_result<fallback::ondemand::field> : public fallback::implementat
 public:
   simdjson_inline simdjson_result(fallback::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -95187,7 +96254,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -95209,7 +96276,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -95657,7 +96724,7 @@ struct simdjson_result<fallback::ondemand::object> : public fallback::implementa
 public:
   simdjson_inline simdjson_result(fallback::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<fallback::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<fallback::ondemand::object_iterator> begin() && noexcept;
@@ -95776,7 +96843,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -95817,6 +96884,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -95834,7 +96902,7 @@ struct simdjson_result<fallback::ondemand::object_iterator> : public fallback::i
 public:
   simdjson_inline simdjson_result(fallback::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -95893,7 +96961,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -95937,7 +97005,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -95965,7 +97033,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -95993,7 +97061,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -96255,6 +97323,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -96308,6 +97380,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -96325,7 +97407,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   fallback::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, fallback::ondemand::array>) {
     arr = val;
@@ -96405,35 +97487,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, fallback::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- fallback::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, fallback::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  fallback::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, fallback::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -96448,27 +97517,6 @@ error_code tag_invoke(deserialize_tag, fallback::ondemand::object &obj, T &out) 
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, fallback::ondemand::value &val, T &out) noexcept(false) {
-  fallback::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, fallback::ondemand::document &doc, T &out) noexcept(false) {
-  fallback::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, fallback::ondemand::document_reference &doc, T &out) noexcept(false) {
-  fallback::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -96493,7 +97541,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -96516,9 +97564,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -96528,10 +97584,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -96553,6 +97621,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -97321,15 +98391,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -97509,12 +98576,12 @@ namespace fallback {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -97527,7 +98594,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -97540,6 +98608,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -97549,7 +98618,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -97560,6 +98630,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -97587,8 +98658,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -98043,6 +99115,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -98062,6 +99135,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -98857,6 +99935,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -98884,7 +99970,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -98911,6 +99997,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -100242,6 +101334,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -100260,7 +101423,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -100274,7 +101438,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -100491,10 +101656,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -100726,61 +101891,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -100830,6 +101988,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -100853,6 +102121,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -100873,6 +102155,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -101028,6 +102316,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -101629,7 +102957,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -101787,7 +103115,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -101807,16 +103136,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -102176,7 +103505,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -102189,6 +103519,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -102198,7 +103529,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -102209,6 +103541,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -102223,6 +103556,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -102248,7 +103582,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -102508,25 +103842,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -102573,7 +103919,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -102843,7 +104222,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -102863,7 +104242,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -102893,6 +104272,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -103196,13 +104609,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -103262,8 +104684,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -103315,7 +104751,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -103324,8 +104760,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -103333,14 +104767,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -103348,9 +104775,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -103430,7 +104857,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -103457,8 +104884,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -103467,14 +104892,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -103482,9 +104900,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -103507,8 +104925,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -103517,14 +104933,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -103532,9 +104941,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -103579,6 +104988,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -103669,6 +105086,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -103692,15 +105114,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -103711,8 +105127,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -103861,15 +105276,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -104071,6 +105480,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -104130,6 +105556,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -104193,6 +105626,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -104309,7 +105748,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -106218,7 +107662,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -106226,6 +107678,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -106544,6 +108005,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -106687,7 +108154,7 @@ struct simdjson_result<haswell::ondemand::value_iterator> : public haswell::impl
 public:
   simdjson_inline simdjson_result(haswell::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -107595,7 +109062,7 @@ struct simdjson_result<haswell::ondemand::value> : public haswell::implementatio
 public:
   simdjson_inline simdjson_result(haswell::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<haswell::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<haswell::ondemand::object> get_object() noexcept;
@@ -107868,7 +109335,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -107994,7 +109461,7 @@ struct simdjson_result<haswell::ondemand::token_iterator> : public haswell::impl
 public:
   simdjson_inline simdjson_result(haswell::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -108071,7 +109538,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -108080,6 +109547,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -108096,6 +109579,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -108275,6 +109764,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -108347,7 +109842,7 @@ public:
   simdjson_inline simdjson_result(haswell::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -108510,7 +110005,7 @@ struct simdjson_result<haswell::ondemand::json_type> : public haswell::implement
 public:
   simdjson_inline simdjson_result(haswell::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -108562,7 +110057,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -108679,6 +110174,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -108717,6 +110226,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -108743,7 +110253,7 @@ struct simdjson_result<haswell::ondemand::raw_json_string> : public haswell::imp
 public:
   simdjson_inline simdjson_result(haswell::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -109205,6 +110715,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -109212,6 +110726,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -109232,7 +110750,7 @@ struct simdjson_result<haswell::ondemand::parser> : public haswell::implementati
 public:
   simdjson_inline simdjson_result(haswell::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -109268,7 +110786,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -109515,7 +111033,7 @@ struct simdjson_result<haswell::ondemand::array> : public haswell::implementatio
 public:
   simdjson_inline simdjson_result(haswell::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<haswell::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<haswell::ondemand::array_iterator> begin() && noexcept;
@@ -109596,7 +111114,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -109654,6 +111172,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -109678,7 +111197,7 @@ struct simdjson_result<haswell::ondemand::array_iterator> : public haswell::impl
 
   simdjson_inline simdjson_result(haswell::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -109728,7 +111247,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -110851,7 +112370,7 @@ struct simdjson_result<haswell::ondemand::document> : public haswell::implementa
 public:
   simdjson_inline simdjson_result(haswell::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<haswell::ondemand::array> get_array() & noexcept;
@@ -110981,7 +112500,7 @@ template<>
 struct simdjson_result<haswell::ondemand::document_reference> : public haswell::implementation_simdjson_result_base<haswell::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(haswell::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<haswell::ondemand::array> get_array() & noexcept;
@@ -111128,7 +112647,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -111478,7 +112997,7 @@ struct simdjson_result<haswell::ondemand::document_stream> : public haswell::imp
 public:
   simdjson_inline simdjson_result(haswell::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -111606,7 +113125,7 @@ struct simdjson_result<haswell::ondemand::field> : public haswell::implementatio
 public:
   simdjson_inline simdjson_result(haswell::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -113150,7 +114669,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -113172,7 +114691,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -113620,7 +115139,7 @@ struct simdjson_result<haswell::ondemand::object> : public haswell::implementati
 public:
   simdjson_inline simdjson_result(haswell::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<haswell::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<haswell::ondemand::object_iterator> begin() && noexcept;
@@ -113739,7 +115258,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -113780,6 +115299,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -113797,7 +115317,7 @@ struct simdjson_result<haswell::ondemand::object_iterator> : public haswell::imp
 public:
   simdjson_inline simdjson_result(haswell::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -113856,7 +115376,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -113900,7 +115420,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -113928,7 +115448,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -113956,7 +115476,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -114218,6 +115738,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -114271,6 +115795,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -114288,7 +115822,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   haswell::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, haswell::ondemand::array>) {
     arr = val;
@@ -114368,35 +115902,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, haswell::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- haswell::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, haswell::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  haswell::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, haswell::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -114411,27 +115932,6 @@ error_code tag_invoke(deserialize_tag, haswell::ondemand::object &obj, T &out) n
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, haswell::ondemand::value &val, T &out) noexcept(false) {
-  haswell::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, haswell::ondemand::document &doc, T &out) noexcept(false) {
-  haswell::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, haswell::ondemand::document_reference &doc, T &out) noexcept(false) {
-  haswell::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -114456,7 +115956,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -114479,9 +115979,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -114491,10 +115999,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -114516,6 +116036,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -115284,15 +116806,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -115472,12 +116991,12 @@ namespace haswell {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -115490,7 +117009,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -115503,6 +117023,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -115512,7 +117033,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -115523,6 +117045,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -115550,8 +117073,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -116006,6 +117530,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -116025,6 +117550,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -116820,6 +118350,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -116847,7 +118385,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -116874,6 +118412,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -118205,6 +119749,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -118223,7 +119838,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -118237,7 +119853,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -118454,10 +120071,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -118689,61 +120306,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -118793,6 +120403,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -118816,6 +120536,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -118836,6 +120570,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -118991,6 +120731,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -119592,7 +121372,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -119750,7 +121530,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -119770,16 +121551,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -120139,7 +121920,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -120152,6 +121934,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -120161,7 +121944,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -120172,6 +121956,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -120186,6 +121971,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -120211,7 +121997,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -120471,25 +122257,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -120536,7 +122334,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -120806,7 +122637,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -120826,7 +122657,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -120856,6 +122687,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -121159,13 +123024,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -121225,8 +123099,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -121278,7 +123166,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -121287,8 +123175,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -121296,14 +123182,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -121311,9 +123190,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -121393,7 +123272,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -121420,8 +123299,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -121430,14 +123307,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -121445,9 +123315,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -121470,8 +123340,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -121480,14 +123348,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -121495,9 +123356,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -121542,6 +123403,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -121632,6 +123501,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -121655,15 +123529,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -121674,8 +123542,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -121824,15 +123691,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -122034,6 +123895,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -122093,6 +123971,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -122156,6 +124041,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -122272,7 +124163,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -124177,7 +126073,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -124185,6 +126089,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -124503,6 +126416,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -124646,7 +126565,7 @@ struct simdjson_result<icelake::ondemand::value_iterator> : public icelake::impl
 public:
   simdjson_inline simdjson_result(icelake::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -125554,7 +127473,7 @@ struct simdjson_result<icelake::ondemand::value> : public icelake::implementatio
 public:
   simdjson_inline simdjson_result(icelake::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<icelake::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<icelake::ondemand::object> get_object() noexcept;
@@ -125827,7 +127746,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -125953,7 +127872,7 @@ struct simdjson_result<icelake::ondemand::token_iterator> : public icelake::impl
 public:
   simdjson_inline simdjson_result(icelake::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -126030,7 +127949,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -126039,6 +127958,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -126055,6 +127990,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -126234,6 +128175,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -126306,7 +128253,7 @@ public:
   simdjson_inline simdjson_result(icelake::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -126469,7 +128416,7 @@ struct simdjson_result<icelake::ondemand::json_type> : public icelake::implement
 public:
   simdjson_inline simdjson_result(icelake::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -126521,7 +128468,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -126638,6 +128585,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -126676,6 +128637,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -126702,7 +128664,7 @@ struct simdjson_result<icelake::ondemand::raw_json_string> : public icelake::imp
 public:
   simdjson_inline simdjson_result(icelake::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -127164,6 +129126,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -127171,6 +129137,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -127191,7 +129161,7 @@ struct simdjson_result<icelake::ondemand::parser> : public icelake::implementati
 public:
   simdjson_inline simdjson_result(icelake::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -127227,7 +129197,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -127474,7 +129444,7 @@ struct simdjson_result<icelake::ondemand::array> : public icelake::implementatio
 public:
   simdjson_inline simdjson_result(icelake::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<icelake::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<icelake::ondemand::array_iterator> begin() && noexcept;
@@ -127555,7 +129525,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -127613,6 +129583,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -127637,7 +129608,7 @@ struct simdjson_result<icelake::ondemand::array_iterator> : public icelake::impl
 
   simdjson_inline simdjson_result(icelake::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -127687,7 +129658,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -128810,7 +130781,7 @@ struct simdjson_result<icelake::ondemand::document> : public icelake::implementa
 public:
   simdjson_inline simdjson_result(icelake::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<icelake::ondemand::array> get_array() & noexcept;
@@ -128940,7 +130911,7 @@ template<>
 struct simdjson_result<icelake::ondemand::document_reference> : public icelake::implementation_simdjson_result_base<icelake::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(icelake::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<icelake::ondemand::array> get_array() & noexcept;
@@ -129087,7 +131058,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -129437,7 +131408,7 @@ struct simdjson_result<icelake::ondemand::document_stream> : public icelake::imp
 public:
   simdjson_inline simdjson_result(icelake::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -129565,7 +131536,7 @@ struct simdjson_result<icelake::ondemand::field> : public icelake::implementatio
 public:
   simdjson_inline simdjson_result(icelake::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -131109,7 +133080,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -131131,7 +133102,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -131579,7 +133550,7 @@ struct simdjson_result<icelake::ondemand::object> : public icelake::implementati
 public:
   simdjson_inline simdjson_result(icelake::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<icelake::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<icelake::ondemand::object_iterator> begin() && noexcept;
@@ -131698,7 +133669,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -131739,6 +133710,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -131756,7 +133728,7 @@ struct simdjson_result<icelake::ondemand::object_iterator> : public icelake::imp
 public:
   simdjson_inline simdjson_result(icelake::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -131815,7 +133787,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -131859,7 +133831,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -131887,7 +133859,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -131915,7 +133887,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -132177,6 +134149,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -132230,6 +134206,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -132247,7 +134233,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   icelake::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, icelake::ondemand::array>) {
     arr = val;
@@ -132327,35 +134313,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, icelake::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- icelake::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, icelake::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  icelake::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, icelake::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -132370,27 +134343,6 @@ error_code tag_invoke(deserialize_tag, icelake::ondemand::object &obj, T &out) n
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, icelake::ondemand::value &val, T &out) noexcept(false) {
-  icelake::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, icelake::ondemand::document &doc, T &out) noexcept(false) {
-  icelake::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, icelake::ondemand::document_reference &doc, T &out) noexcept(false) {
-  icelake::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -132415,7 +134367,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -132438,9 +134390,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -132450,10 +134410,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -132475,6 +134447,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -133243,15 +135217,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -133431,12 +135402,12 @@ namespace icelake {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -133449,7 +135420,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -133462,6 +135434,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -133471,7 +135444,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -133482,6 +135456,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -133509,8 +135484,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -133965,6 +135941,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -133984,6 +135961,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -134779,6 +136761,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -134806,7 +136796,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -134833,6 +136823,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -136164,6 +138160,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -136182,7 +138249,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -136196,7 +138264,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -136413,10 +138482,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -136648,61 +138717,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -136752,6 +138814,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -136775,6 +138947,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -136795,6 +138981,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -136950,6 +139142,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -137551,7 +139783,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -137709,7 +139941,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -137729,16 +139962,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -138098,7 +140331,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -138111,6 +140345,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -138120,7 +140355,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -138131,6 +140367,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -138145,6 +140382,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -138170,7 +140408,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -138430,25 +140668,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -138495,7 +140745,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -138765,7 +141048,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -138785,7 +141068,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -138815,6 +141098,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -139118,13 +141435,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -139184,8 +141510,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -139237,7 +141577,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -139246,8 +141586,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -139255,14 +141593,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -139270,9 +141601,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -139352,7 +141683,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -139379,8 +141710,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -139389,14 +141718,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -139404,9 +141726,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -139429,8 +141751,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -139439,14 +141759,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -139454,9 +141767,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -139501,6 +141814,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -139591,6 +141912,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -139614,15 +141940,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -139633,8 +141953,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -139783,15 +142102,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -139993,6 +142306,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -140052,6 +142382,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -140115,6 +142452,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -140231,7 +142574,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -141863,7 +144211,7 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline simd8<bool>
   operator<(const simd8<uint8_t> other) const {
-    return this->gt_bits(other).any_bits_set();
+    return this->lt_bits(other).any_bits_set();
   }
 
   // Bit-specific operations
@@ -141891,6 +144239,9 @@ template <> struct simd8<uint8_t> : base8_numeric<uint8_t> {
   }
   simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const {
     return !bits_not_set_anywhere(bits);
+  }
+  simdjson_inline bool is_ascii() const {
+    return this->bits_not_set_anywhere(uint8_t(0x80));
   }
   template <int N> simdjson_inline simd8<uint8_t> shr() const {
     return simd8<uint8_t>(
@@ -142254,7 +144605,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -142262,6 +144621,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -142580,6 +144948,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -142723,7 +145097,7 @@ struct simdjson_result<ppc64::ondemand::value_iterator> : public ppc64::implemen
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -143631,7 +146005,7 @@ struct simdjson_result<ppc64::ondemand::value> : public ppc64::implementation_si
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<ppc64::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<ppc64::ondemand::object> get_object() noexcept;
@@ -143904,7 +146278,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -144030,7 +146404,7 @@ struct simdjson_result<ppc64::ondemand::token_iterator> : public ppc64::implemen
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -144107,7 +146481,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -144116,6 +146490,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -144132,6 +146522,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -144311,6 +146707,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -144383,7 +146785,7 @@ public:
   simdjson_inline simdjson_result(ppc64::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -144546,7 +146948,7 @@ struct simdjson_result<ppc64::ondemand::json_type> : public ppc64::implementatio
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -144598,7 +147000,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -144715,6 +147117,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -144753,6 +147169,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -144779,7 +147196,7 @@ struct simdjson_result<ppc64::ondemand::raw_json_string> : public ppc64::impleme
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -145241,6 +147658,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -145248,6 +147669,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -145268,7 +147693,7 @@ struct simdjson_result<ppc64::ondemand::parser> : public ppc64::implementation_s
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -145304,7 +147729,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -145551,7 +147976,7 @@ struct simdjson_result<ppc64::ondemand::array> : public ppc64::implementation_si
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<ppc64::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<ppc64::ondemand::array_iterator> begin() && noexcept;
@@ -145632,7 +148057,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -145690,6 +148115,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -145714,7 +148140,7 @@ struct simdjson_result<ppc64::ondemand::array_iterator> : public ppc64::implemen
 
   simdjson_inline simdjson_result(ppc64::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -145764,7 +148190,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -146887,7 +149313,7 @@ struct simdjson_result<ppc64::ondemand::document> : public ppc64::implementation
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<ppc64::ondemand::array> get_array() & noexcept;
@@ -147017,7 +149443,7 @@ template<>
 struct simdjson_result<ppc64::ondemand::document_reference> : public ppc64::implementation_simdjson_result_base<ppc64::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<ppc64::ondemand::array> get_array() & noexcept;
@@ -147164,7 +149590,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -147514,7 +149940,7 @@ struct simdjson_result<ppc64::ondemand::document_stream> : public ppc64::impleme
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -147642,7 +150068,7 @@ struct simdjson_result<ppc64::ondemand::field> : public ppc64::implementation_si
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -149186,7 +151612,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -149208,7 +151634,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -149656,7 +152082,7 @@ struct simdjson_result<ppc64::ondemand::object> : public ppc64::implementation_s
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<ppc64::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<ppc64::ondemand::object_iterator> begin() && noexcept;
@@ -149775,7 +152201,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -149816,6 +152242,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -149833,7 +152260,7 @@ struct simdjson_result<ppc64::ondemand::object_iterator> : public ppc64::impleme
 public:
   simdjson_inline simdjson_result(ppc64::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -149892,7 +152319,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -149936,7 +152363,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -149964,7 +152391,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -149992,7 +152419,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -150254,6 +152681,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -150307,6 +152738,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -150324,7 +152765,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   ppc64::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, ppc64::ondemand::array>) {
     arr = val;
@@ -150404,35 +152845,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, ppc64::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- ppc64::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, ppc64::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  ppc64::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, ppc64::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -150447,27 +152875,6 @@ error_code tag_invoke(deserialize_tag, ppc64::ondemand::object &obj, T &out) noe
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, ppc64::ondemand::value &val, T &out) noexcept(false) {
-  ppc64::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, ppc64::ondemand::document &doc, T &out) noexcept(false) {
-  ppc64::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, ppc64::ondemand::document_reference &doc, T &out) noexcept(false) {
-  ppc64::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -150492,7 +152899,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -150515,9 +152922,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -150527,10 +152942,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -150552,6 +152979,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -151320,15 +153749,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -151508,12 +153934,12 @@ namespace ppc64 {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -151526,7 +153952,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -151539,6 +153966,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -151548,7 +153976,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -151559,6 +153988,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -151586,8 +154016,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -152042,6 +154473,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -152061,6 +154493,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -152856,6 +155293,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -152883,7 +155328,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -152910,6 +155355,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -154241,6 +156692,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -154259,7 +156781,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -154273,7 +156796,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -154490,10 +157014,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -154725,61 +157249,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -154829,6 +157346,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -154852,6 +157479,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -154872,6 +157513,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -155027,6 +157674,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -155628,7 +158315,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -155786,7 +158473,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -155806,16 +158494,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -156175,7 +158863,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -156188,6 +158877,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -156197,7 +158887,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -156208,6 +158899,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -156222,6 +158914,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -156247,7 +158940,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -156507,25 +159200,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -156572,7 +159277,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -156842,7 +159580,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -156862,7 +159600,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -156892,6 +159630,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -157195,13 +159967,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -157261,8 +160042,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -157314,7 +160109,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -157323,8 +160118,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -157332,14 +160125,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -157347,9 +160133,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -157429,7 +160215,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -157456,8 +160242,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -157466,14 +160250,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -157481,9 +160258,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -157506,8 +160283,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -157516,14 +160291,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -157531,9 +160299,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -157578,6 +160346,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -157668,6 +160444,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -157691,15 +160472,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -157710,8 +160485,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -157860,15 +160634,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -158070,6 +160838,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -158129,6 +160914,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -158192,6 +160984,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -158308,7 +161106,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -159875,7 +162678,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -160294,7 +163097,7 @@ namespace simd {
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return other.max_val(*this) == other; }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return other.min_val(*this) == other; }
     simdjson_inline simd8<bool> operator>(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
-    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->gt_bits(other).any_bits_set(); }
+    simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const { return this->lt_bits(other).any_bits_set(); }
 
     // Bit-specific operations
     simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
@@ -160639,7 +163442,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -160647,6 +163458,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -160965,6 +163785,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -161108,7 +163934,7 @@ struct simdjson_result<westmere::ondemand::value_iterator> : public westmere::im
 public:
   simdjson_inline simdjson_result(westmere::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -162016,7 +164842,7 @@ struct simdjson_result<westmere::ondemand::value> : public westmere::implementat
 public:
   simdjson_inline simdjson_result(westmere::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<westmere::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<westmere::ondemand::object> get_object() noexcept;
@@ -162289,7 +165115,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -162415,7 +165241,7 @@ struct simdjson_result<westmere::ondemand::token_iterator> : public westmere::im
 public:
   simdjson_inline simdjson_result(westmere::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -162492,7 +165318,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -162501,6 +165327,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -162517,6 +165359,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -162696,6 +165544,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -162768,7 +165622,7 @@ public:
   simdjson_inline simdjson_result(westmere::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -162931,7 +165785,7 @@ struct simdjson_result<westmere::ondemand::json_type> : public westmere::impleme
 public:
   simdjson_inline simdjson_result(westmere::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -162983,7 +165837,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -163100,6 +165954,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -163138,6 +166006,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -163164,7 +166033,7 @@ struct simdjson_result<westmere::ondemand::raw_json_string> : public westmere::i
 public:
   simdjson_inline simdjson_result(westmere::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -163626,6 +166495,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -163633,6 +166506,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -163653,7 +166530,7 @@ struct simdjson_result<westmere::ondemand::parser> : public westmere::implementa
 public:
   simdjson_inline simdjson_result(westmere::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -163689,7 +166566,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -163936,7 +166813,7 @@ struct simdjson_result<westmere::ondemand::array> : public westmere::implementat
 public:
   simdjson_inline simdjson_result(westmere::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<westmere::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<westmere::ondemand::array_iterator> begin() && noexcept;
@@ -164017,7 +166894,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -164075,6 +166952,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -164099,7 +166977,7 @@ struct simdjson_result<westmere::ondemand::array_iterator> : public westmere::im
 
   simdjson_inline simdjson_result(westmere::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -164149,7 +167027,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -165272,7 +168150,7 @@ struct simdjson_result<westmere::ondemand::document> : public westmere::implemen
 public:
   simdjson_inline simdjson_result(westmere::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<westmere::ondemand::array> get_array() & noexcept;
@@ -165402,7 +168280,7 @@ template<>
 struct simdjson_result<westmere::ondemand::document_reference> : public westmere::implementation_simdjson_result_base<westmere::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(westmere::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<westmere::ondemand::array> get_array() & noexcept;
@@ -165549,7 +168427,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -165899,7 +168777,7 @@ struct simdjson_result<westmere::ondemand::document_stream> : public westmere::i
 public:
   simdjson_inline simdjson_result(westmere::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -166027,7 +168905,7 @@ struct simdjson_result<westmere::ondemand::field> : public westmere::implementat
 public:
   simdjson_inline simdjson_result(westmere::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -167571,7 +170449,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -167593,7 +170471,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -168041,7 +170919,7 @@ struct simdjson_result<westmere::ondemand::object> : public westmere::implementa
 public:
   simdjson_inline simdjson_result(westmere::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<westmere::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<westmere::ondemand::object_iterator> begin() && noexcept;
@@ -168160,7 +171038,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -168201,6 +171079,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -168218,7 +171097,7 @@ struct simdjson_result<westmere::ondemand::object_iterator> : public westmere::i
 public:
   simdjson_inline simdjson_result(westmere::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -168277,7 +171156,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -168321,7 +171200,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -168349,7 +171228,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -168377,7 +171256,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -168639,6 +171518,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -168692,6 +171575,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -168709,7 +171602,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   westmere::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, westmere::ondemand::array>) {
     arr = val;
@@ -168789,35 +171682,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, westmere::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- westmere::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, westmere::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  westmere::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, westmere::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -168832,27 +171712,6 @@ error_code tag_invoke(deserialize_tag, westmere::ondemand::object &obj, T &out) 
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, westmere::ondemand::value &val, T &out) noexcept(false) {
-  westmere::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, westmere::ondemand::document &doc, T &out) noexcept(false) {
-  westmere::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, westmere::ondemand::document_reference &doc, T &out) noexcept(false) {
-  westmere::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -168877,7 +171736,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -168900,9 +171759,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -168912,10 +171779,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -168937,6 +171816,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -169705,15 +172586,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -169893,12 +172771,12 @@ namespace westmere {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -169911,7 +172789,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -169924,6 +172803,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -169933,7 +172813,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -169944,6 +172825,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -169971,8 +172853,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -170427,6 +173310,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -170446,6 +173330,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -171241,6 +174130,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -171268,7 +174165,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -171295,6 +174192,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -172626,6 +175529,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -172644,7 +175618,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -172658,7 +175633,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -172875,10 +175851,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -173110,61 +176086,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -173214,6 +176183,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -173237,6 +176316,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -173257,6 +176350,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -173412,6 +176511,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -174013,7 +177152,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -174171,7 +177310,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -174191,16 +177331,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -174560,7 +177700,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -174573,6 +177714,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -174582,7 +177724,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -174593,6 +177736,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -174607,6 +177751,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -174632,7 +177777,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -174892,25 +178037,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -174957,7 +178114,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -175227,7 +178417,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -175247,7 +178437,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -175277,6 +178467,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -175580,13 +178804,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -175646,8 +178879,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -175699,7 +178946,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -175708,8 +178955,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -175717,14 +178962,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -175732,9 +178970,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -175814,7 +179052,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -175841,8 +179079,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -175851,14 +179087,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -175866,9 +179095,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -175891,8 +179120,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -175901,14 +179128,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -175916,9 +179136,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -175963,6 +179183,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -176053,6 +179281,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -176076,15 +179309,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -176095,8 +179322,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -176245,15 +179471,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -176455,6 +179675,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -176514,6 +179751,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -176577,6 +179821,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -176693,7 +179943,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -177971,7 +181226,7 @@ namespace simd {
     simdjson_inline simd8(bool _value) : base8<bool>(splat(_value)) {}
 
     simdjson_inline int to_bitmask() const { return __lsx_vpickve2gr_w(__lsx_vmskltz_b(*this), 0); }
-    simdjson_inline bool any() const { return 0 == __lsx_vpickve2gr_hu(__lsx_vmsknz_b(*this), 0); }
+    simdjson_inline bool any() const { return !__lsx_bz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -178514,7 +181769,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -178522,6 +181785,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -178840,6 +182112,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -178983,7 +182261,7 @@ struct simdjson_result<lsx::ondemand::value_iterator> : public lsx::implementati
 public:
   simdjson_inline simdjson_result(lsx::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -179891,7 +183169,7 @@ struct simdjson_result<lsx::ondemand::value> : public lsx::implementation_simdjs
 public:
   simdjson_inline simdjson_result(lsx::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lsx::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<lsx::ondemand::object> get_object() noexcept;
@@ -180164,7 +183442,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -180290,7 +183568,7 @@ struct simdjson_result<lsx::ondemand::token_iterator> : public lsx::implementati
 public:
   simdjson_inline simdjson_result(lsx::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -180367,7 +183645,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -180376,6 +183654,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -180392,6 +183686,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -180571,6 +183871,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -180643,7 +183949,7 @@ public:
   simdjson_inline simdjson_result(lsx::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -180806,7 +184112,7 @@ struct simdjson_result<lsx::ondemand::json_type> : public lsx::implementation_si
 public:
   simdjson_inline simdjson_result(lsx::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -180858,7 +184164,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -180975,6 +184281,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -181013,6 +184333,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -181039,7 +184360,7 @@ struct simdjson_result<lsx::ondemand::raw_json_string> : public lsx::implementat
 public:
   simdjson_inline simdjson_result(lsx::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -181501,6 +184822,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -181508,6 +184833,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -181528,7 +184857,7 @@ struct simdjson_result<lsx::ondemand::parser> : public lsx::implementation_simdj
 public:
   simdjson_inline simdjson_result(lsx::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -181564,7 +184893,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -181811,7 +185140,7 @@ struct simdjson_result<lsx::ondemand::array> : public lsx::implementation_simdjs
 public:
   simdjson_inline simdjson_result(lsx::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lsx::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<lsx::ondemand::array_iterator> begin() && noexcept;
@@ -181892,7 +185221,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -181950,6 +185279,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -181974,7 +185304,7 @@ struct simdjson_result<lsx::ondemand::array_iterator> : public lsx::implementati
 
   simdjson_inline simdjson_result(lsx::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -182024,7 +185354,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -183147,7 +186477,7 @@ struct simdjson_result<lsx::ondemand::document> : public lsx::implementation_sim
 public:
   simdjson_inline simdjson_result(lsx::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<lsx::ondemand::array> get_array() & noexcept;
@@ -183277,7 +186607,7 @@ template<>
 struct simdjson_result<lsx::ondemand::document_reference> : public lsx::implementation_simdjson_result_base<lsx::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(lsx::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<lsx::ondemand::array> get_array() & noexcept;
@@ -183424,7 +186754,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -183774,7 +187104,7 @@ struct simdjson_result<lsx::ondemand::document_stream> : public lsx::implementat
 public:
   simdjson_inline simdjson_result(lsx::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -183902,7 +187232,7 @@ struct simdjson_result<lsx::ondemand::field> : public lsx::implementation_simdjs
 public:
   simdjson_inline simdjson_result(lsx::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -185446,7 +188776,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -185468,7 +188798,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -185916,7 +189246,7 @@ struct simdjson_result<lsx::ondemand::object> : public lsx::implementation_simdj
 public:
   simdjson_inline simdjson_result(lsx::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lsx::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<lsx::ondemand::object_iterator> begin() && noexcept;
@@ -186035,7 +189365,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -186076,6 +189406,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -186093,7 +189424,7 @@ struct simdjson_result<lsx::ondemand::object_iterator> : public lsx::implementat
 public:
   simdjson_inline simdjson_result(lsx::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -186152,7 +189483,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -186196,7 +189527,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -186224,7 +189555,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -186252,7 +189583,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -186514,6 +189845,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -186567,6 +189902,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -186584,7 +189929,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   lsx::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, lsx::ondemand::array>) {
     arr = val;
@@ -186664,35 +190009,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, lsx::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- lsx::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lsx::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  lsx::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, lsx::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -186707,27 +190039,6 @@ error_code tag_invoke(deserialize_tag, lsx::ondemand::object &obj, T &out) noexc
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lsx::ondemand::value &val, T &out) noexcept(false) {
-  lsx::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lsx::ondemand::document &doc, T &out) noexcept(false) {
-  lsx::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lsx::ondemand::document_reference &doc, T &out) noexcept(false) {
-  lsx::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -186752,7 +190063,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -186775,9 +190086,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -186787,10 +190106,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -186812,6 +190143,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -187580,15 +190913,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -187768,12 +191098,12 @@ namespace lsx {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -187786,7 +191116,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -187799,6 +191130,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -187808,7 +191140,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -187819,6 +191152,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -187846,8 +191180,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -188302,6 +191637,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -188321,6 +191657,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -189116,6 +192457,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -189143,7 +192492,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -189170,6 +192519,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -190501,6 +193856,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -190519,7 +193945,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -190533,7 +193960,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -190750,10 +194178,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -190985,61 +194413,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -191089,6 +194510,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -191112,6 +194643,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -191132,6 +194677,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -191287,6 +194838,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -191888,7 +195479,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -192046,7 +195637,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -192066,16 +195658,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -192435,7 +196027,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -192448,6 +196041,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -192457,7 +196051,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -192468,6 +196063,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -192482,6 +196078,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -192507,7 +196104,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -192767,25 +196364,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -192832,7 +196441,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -193102,7 +196744,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -193122,7 +196764,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -193152,6 +196794,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -193455,13 +197131,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -193521,8 +197206,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -193574,7 +197273,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -193583,8 +197282,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -193592,14 +197289,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -193607,9 +197297,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -193689,7 +197379,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -193716,8 +197406,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -193726,14 +197414,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -193741,9 +197422,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -193766,8 +197447,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -193776,14 +197455,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -193791,9 +197463,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -193838,6 +197510,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -193928,6 +197608,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -193951,15 +197636,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -193970,8 +197649,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -194120,15 +197798,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -194330,6 +198002,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -194389,6 +198078,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -194452,6 +198148,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -194568,7 +198270,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -195637,7 +199344,18 @@ template <typename T> struct simd8x64;
 /* amalgamation skipped (editor-only): #endif // SIMDJSON_CONDITIONAL_INCLUDE */
 
 #include <lsxintrin.h>
+#if defined(__clang__) && !defined(__loongarch_asx)
+// LLVM's lasxintrin.h only declares the LASX types and functions when
+// __loongarch_asx is defined, that is, when the code is compiled with -mlasx.
+// For runtime dispatching, we include it inside a target("lasx") region
+// (see simdjson/lasx/begin.h) where the LASX builtins are available, so we
+// define __loongarch_asx while including the header.
+#define __loongarch_asx 1
 #include <lasxintrin.h>
+#undef __loongarch_asx
+#else
+#include <lasxintrin.h>
+#endif
 
 static_assert(sizeof(__m256i) <= simdjson::SIMDJSON_PADDING, "insufficient padding for LoongArch ASX");
 
@@ -195856,10 +199574,7 @@ namespace simd {
       __m256i mask = __lasx_xvmskltz_b(*this);
       return (__lasx_xvpickve2gr_w(mask, 4) << 16) | (__lasx_xvpickve2gr_w(mask, 0));
     }
-   simdjson_inline bool any() const {
-      __m256i v = __lasx_xvmsknz_b(*this);
-      return (0 == __lasx_xvpickve2gr_w(v, 0)) && (0 == __lasx_xvpickve2gr_w(v, 4));
-    }
+    simdjson_inline bool any() const { return !__lasx_xbz_v(this->value); }
     simdjson_inline simd8<bool> operator~() const { return *this ^ true; }
   };
 
@@ -196412,7 +200127,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -196420,6 +200143,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -196738,6 +200470,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -196881,7 +200619,7 @@ struct simdjson_result<lasx::ondemand::value_iterator> : public lasx::implementa
 public:
   simdjson_inline simdjson_result(lasx::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -197789,7 +201527,7 @@ struct simdjson_result<lasx::ondemand::value> : public lasx::implementation_simd
 public:
   simdjson_inline simdjson_result(lasx::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lasx::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<lasx::ondemand::object> get_object() noexcept;
@@ -198062,7 +201800,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -198188,7 +201926,7 @@ struct simdjson_result<lasx::ondemand::token_iterator> : public lasx::implementa
 public:
   simdjson_inline simdjson_result(lasx::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -198265,7 +202003,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -198274,6 +202012,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -198290,6 +202044,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -198469,6 +202229,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -198541,7 +202307,7 @@ public:
   simdjson_inline simdjson_result(lasx::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -198704,7 +202470,7 @@ struct simdjson_result<lasx::ondemand::json_type> : public lasx::implementation_
 public:
   simdjson_inline simdjson_result(lasx::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -198756,7 +202522,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -198873,6 +202639,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -198911,6 +202691,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -198937,7 +202718,7 @@ struct simdjson_result<lasx::ondemand::raw_json_string> : public lasx::implement
 public:
   simdjson_inline simdjson_result(lasx::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -199399,6 +203180,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -199406,6 +203191,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -199426,7 +203215,7 @@ struct simdjson_result<lasx::ondemand::parser> : public lasx::implementation_sim
 public:
   simdjson_inline simdjson_result(lasx::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -199462,7 +203251,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -199709,7 +203498,7 @@ struct simdjson_result<lasx::ondemand::array> : public lasx::implementation_simd
 public:
   simdjson_inline simdjson_result(lasx::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lasx::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<lasx::ondemand::array_iterator> begin() && noexcept;
@@ -199790,7 +203579,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -199848,6 +203637,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -199872,7 +203662,7 @@ struct simdjson_result<lasx::ondemand::array_iterator> : public lasx::implementa
 
   simdjson_inline simdjson_result(lasx::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -199922,7 +203712,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -201045,7 +204835,7 @@ struct simdjson_result<lasx::ondemand::document> : public lasx::implementation_s
 public:
   simdjson_inline simdjson_result(lasx::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<lasx::ondemand::array> get_array() & noexcept;
@@ -201175,7 +204965,7 @@ template<>
 struct simdjson_result<lasx::ondemand::document_reference> : public lasx::implementation_simdjson_result_base<lasx::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(lasx::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<lasx::ondemand::array> get_array() & noexcept;
@@ -201322,7 +205112,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -201672,7 +205462,7 @@ struct simdjson_result<lasx::ondemand::document_stream> : public lasx::implement
 public:
   simdjson_inline simdjson_result(lasx::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -201800,7 +205590,7 @@ struct simdjson_result<lasx::ondemand::field> : public lasx::implementation_simd
 public:
   simdjson_inline simdjson_result(lasx::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -203344,7 +207134,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -203366,7 +207156,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -203814,7 +207604,7 @@ struct simdjson_result<lasx::ondemand::object> : public lasx::implementation_sim
 public:
   simdjson_inline simdjson_result(lasx::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<lasx::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<lasx::ondemand::object_iterator> begin() && noexcept;
@@ -203933,7 +207723,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -203974,6 +207764,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -203991,7 +207782,7 @@ struct simdjson_result<lasx::ondemand::object_iterator> : public lasx::implement
 public:
   simdjson_inline simdjson_result(lasx::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -204050,7 +207841,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -204094,7 +207885,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -204122,7 +207913,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -204150,7 +207941,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -204412,6 +208203,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -204465,6 +208260,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -204482,7 +208287,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   lasx::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, lasx::ondemand::array>) {
     arr = val;
@@ -204562,35 +208367,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, lasx::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- lasx::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lasx::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  lasx::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, lasx::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -204605,27 +208397,6 @@ error_code tag_invoke(deserialize_tag, lasx::ondemand::object &obj, T &out) noex
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lasx::ondemand::value &val, T &out) noexcept(false) {
-  lasx::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lasx::ondemand::document &doc, T &out) noexcept(false) {
-  lasx::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, lasx::ondemand::document_reference &doc, T &out) noexcept(false) {
-  lasx::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -204650,7 +208421,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -204673,9 +208444,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -204685,10 +208464,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -204710,6 +208501,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -205478,15 +209271,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -205666,12 +209456,12 @@ namespace lasx {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -205684,7 +209474,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -205697,6 +209488,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -205706,7 +209498,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -205717,6 +209510,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -205744,8 +209538,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -206200,6 +209995,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -206219,6 +210015,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -207014,6 +210815,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -207041,7 +210850,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -207068,6 +210877,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -208399,6 +212214,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -208417,7 +212303,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -208431,7 +212318,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -208648,10 +212536,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -208883,61 +212771,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -208987,6 +212868,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -209010,6 +213001,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -209030,6 +213035,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -209185,6 +213196,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -209786,7 +213837,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -209944,7 +213995,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -209964,16 +214016,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -210333,7 +214385,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -210346,6 +214399,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -210355,7 +214409,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -210366,6 +214421,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -210380,6 +214436,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -210405,7 +214462,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -210665,25 +214722,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -210730,7 +214799,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -211000,7 +215102,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -211020,7 +215122,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -211050,6 +215152,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -211353,13 +215489,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -211419,8 +215564,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -211472,7 +215631,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -211481,8 +215640,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -211490,14 +215647,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -211505,9 +215655,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -211587,7 +215737,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -211614,8 +215764,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -211624,14 +215772,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -211639,9 +215780,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -211664,8 +215805,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -211674,14 +215813,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -211689,9 +215821,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -211736,6 +215868,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -211826,6 +215966,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -211849,15 +215994,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -211868,8 +216007,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -212018,15 +216156,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -212228,6 +216360,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -212287,6 +216436,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -212350,6 +216506,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -212466,7 +216628,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
@@ -213721,7 +217888,9 @@ namespace simd {
     simdjson_inline simd8<bool> operator|(const simd8<bool> other) const {  return __riscv_vmor(*this, other, VL8); }
     simdjson_inline simd8<bool> operator&(const simd8<bool> other) const {  return __riscv_vmand(*this, other, VL8); }
     simdjson_inline simd8<bool> operator^(const simd8<bool> other) const {  return __riscv_vmxor(*this, other, VL8); }
-    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(other, *this, VL8); }
+    simdjson_inline simd8<bool> bit_andnot(const simd8<bool> other) const { return __riscv_vmandn(*this, other, VL8); }
+    simdjson_inline simd8<bool> operator==(const simd8<bool> other) const { return __riscv_vmxnor(*this, other, VL8); }
+    simdjson_inline bool any() const { return __riscv_vfirst(value, VL8) >= 0; }
     simdjson_inline simd8<bool> operator~() const { return __riscv_vmnot(*this, VL8); }
     simdjson_inline simd8<bool>& operator|=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast | other; return *this_cast; }
     simdjson_inline simd8<bool>& operator&=(const simd8<bool> other) { auto this_cast = static_cast<simd8<bool>*>(this); *this_cast = *this_cast & other; return *this_cast; }
@@ -213773,9 +217942,9 @@ namespace simd {
     simdjson_inline simd8<uint8_t> operator^(const simd8<uint8_t> other) const { return  __riscv_vxor_vv_u8m1( value, other, VL8); }
     simdjson_inline simd8<uint8_t> operator~() const { return __riscv_vnot_v_u8m1(value, VL8); }
 #if __riscv_zvbb
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(other, value, VL8); }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return __riscv_vandn_vv_u8m1(value, other, VL8); }
 #else
-    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return other & ~*this; }
+    simdjson_inline simd8<uint8_t> bit_andnot(const simd8<uint8_t> other) const { return *this & ~other; }
 #endif
     simdjson_inline simd8<uint8_t>& operator|=(const simd8<uint8_t> other) { value = *this | other; return *this; }
     simdjson_inline simd8<uint8_t>& operator&=(const simd8<uint8_t> other) { value = *this & other; return *this; }
@@ -213803,6 +217972,8 @@ namespace simd {
     simdjson_inline simd8<uint8_t>& operator-=(const simd8<uint8_t> other) { value = *this - other; return *this; }
 
     // Order-specific operations
+    simdjson_inline simd8<uint8_t> max_val(const simd8<uint8_t> other) const { return __riscv_vmaxu(value, other, VL8); }
+    simdjson_inline simd8<uint8_t> min_val(const simd8<uint8_t> other) const { return __riscv_vminu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<=(const simd8<uint8_t> other) const { return __riscv_vmsleu(value, other, VL8); }
     simdjson_inline simd8<bool> operator>=(const simd8<uint8_t> other) const { return __riscv_vmsgeu(value, other, VL8); }
     simdjson_inline simd8<bool> operator<(const simd8<uint8_t> other) const  { return __riscv_vmsltu(value, other, VL8); }
@@ -213814,10 +217985,17 @@ namespace simd {
     simdjson_inline simd8<uint8_t> lt_bits(const simd8<uint8_t> other) const { return simd8<uint8_t>(*this < other); }
 
     // Bit-specific operations
+    simdjson_inline simd8<bool> bits_not_set() const { return *this == uint8_t(0); }
+    simdjson_inline simd8<bool> bits_not_set(simd8<uint8_t> bits) const { return (*this & bits).bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set() const { return ~this->bits_not_set(); }
+    simdjson_inline simd8<bool> any_bits_set(simd8<uint8_t> bits) const { return ~this->bits_not_set(bits); }
+    simdjson_inline bool bits_not_set_anywhere() const { return !any_bits_set_anywhere(); }
     simdjson_inline bool any_bits_set_anywhere() const {
       return __riscv_vfirst(__riscv_vmsne(value, 0, VL8), VL8) >= 0;
     }
+    simdjson_inline bool bits_not_set_anywhere(simd8<uint8_t> bits) const { return !any_bits_set_anywhere(bits); }
     simdjson_inline bool any_bits_set_anywhere(simd8<uint8_t> bits) const { return (*this & bits).any_bits_set_anywhere(); }
+    simdjson_inline bool is_ascii() const { return bits_not_set_anywhere(uint8_t(0x80)); }
     template<int N>
     simdjson_inline simd8<uint8_t> shr() const { return __riscv_vsrl(value, N, VL8); }
     template<int N>
@@ -214320,7 +218498,15 @@ protected:
   token_position _start_position{};
 
 public:
-  simdjson_inline value_iterator() noexcept = default;
+  simdjson_inline value_iterator() noexcept {}
+  simdjson_inline value_iterator(const value_iterator &other) noexcept
+    : _json_iter{other._json_iter}, _depth{other._depth}, _start_position{other._start_position} {}
+  simdjson_inline value_iterator &operator=(const value_iterator &other) noexcept {
+    _json_iter = other._json_iter;
+    _depth = other._depth;
+    _start_position = other._start_position;
+    return *this;
+  }
 
   /**
    * Skips a non-iterated or partially-iterated JSON value, whether it is a scalar, array or object.
@@ -214328,6 +218514,15 @@ public:
    * Optimized for scalars.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child() noexcept;
+  /**
+   * Skips the current child, knowing where it starts: if the iterator is still there, the child
+   * was not read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_child(token_position child_start) noexcept;
+  /** Skips the value of the current field, if it was not read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_child() noexcept;
+  /** Skips the value of a field whose colon was just read. */
+  simdjson_warn_unused simdjson_inline error_code skip_field_value() noexcept;
 
   /**
    * Tell whether the iterator is at the EOF mark
@@ -214646,6 +218841,12 @@ public:
   /** @} */
 protected:
   /**
+   * Whether actual_key, the key we just read along with its colon, equals key.
+   * Unlike raw_json_string::unsafe_is_equal, key may hold unescaped quotes.
+   */
+  simdjson_inline bool key_matches(raw_json_string actual_key, std::string_view key) const noexcept;
+
+  /**
    * Restarts an array iteration.
    * @returns Whether the array has any elements (returns false for empty).
    */
@@ -214789,7 +218990,7 @@ struct simdjson_result<rvv_vls::ondemand::value_iterator> : public rvv_vls::impl
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::value_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -215697,7 +219898,7 @@ struct simdjson_result<rvv_vls::ondemand::value> : public rvv_vls::implementatio
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::value &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<rvv_vls::ondemand::array> get_array() noexcept;
   simdjson_inline simdjson_result<rvv_vls::ondemand::object> get_object() noexcept;
@@ -215970,7 +220171,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline token_iterator() noexcept = default;
+  simdjson_inline token_iterator() noexcept {}
   simdjson_inline token_iterator(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator &operator=(token_iterator &&other) noexcept = default;
   simdjson_inline token_iterator(const token_iterator &other) noexcept = default;
@@ -216096,7 +220297,7 @@ struct simdjson_result<rvv_vls::ondemand::token_iterator> : public rvv_vls::impl
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::token_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -216173,7 +220374,7 @@ protected:
 #endif
 
 public:
-  simdjson_inline json_iterator() noexcept = default;
+  simdjson_inline json_iterator() noexcept {}
   simdjson_inline json_iterator(json_iterator &&other) noexcept;
   simdjson_inline json_iterator &operator=(json_iterator &&other) noexcept;
   simdjson_inline explicit json_iterator(const json_iterator &other) noexcept = default;
@@ -216182,6 +220383,22 @@ public:
    * Skips a JSON value, whether it is a scalar, array or object.
    */
   simdjson_warn_unused simdjson_inline error_code skip_child(depth_t parent_depth) noexcept;
+  /**
+   * Skips the value of a field whose colon was just read.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_value(depth_t parent_depth) noexcept;
+  /**
+   * Skips what is left of a child that was entered or read in part: the iterator is past the
+   * start of the child.
+   */
+  simdjson_warn_unused simdjson_inline error_code skip_partial(depth_t parent_depth) noexcept;
+  /** Skips the tokens of a container that was entered until the depth returns to parent_depth. */
+  simdjson_warn_unused simdjson_inline error_code skip_rest(depth_t parent_depth) noexcept;
+  /** Tells whether the token just consumed cannot follow the token before it. */
+  simdjson_inline bool out_of_place(uint8_t current) const noexcept;
+  simdjson_inline error_code out_of_place_error() noexcept;
+  /** Tells whether the string before pos, followed by a colon, is a key. */
+  static bool string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept;
 
   /**
    * Tell whether the iterator is still at the start
@@ -216198,6 +220415,12 @@ public:
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   simdjson_inline bool allow_incomplete_json() const noexcept;
   simdjson_inline size_t remaining_input_length(const uint8_t *json) const noexcept;
+  /**
+   * The last scalar of an incomplete document may be cut by the end of the input, and the number
+   * and atom parsers would read on into the bytes past it. Returns a copy of such a scalar padded
+   * with spaces, and json itself for any other scalar.
+   */
+  simdjson_inline const uint8_t *scalar_within_input(const uint8_t *json) noexcept;
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
   /**
@@ -216377,6 +220600,12 @@ public:
    * overflow.
    */
   simdjson_inline simdjson_result<std::string_view> unescape(raw_json_string in, bool allow_replacement) noexcept;
+  /**
+   * Unescape the raw_json_string into receiver. Unlike unescape(), this doesn't leave the string in
+   * the parser's string buffer.
+   */
+  template <typename string_type>
+  simdjson_warn_unused simdjson_inline error_code unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept;
   simdjson_inline simdjson_result<std::string_view> unescape_wobbly(raw_json_string in) noexcept;
 
   simdjson_inline void reenter_child(token_position position, depth_t child_depth) noexcept;
@@ -216449,7 +220678,7 @@ public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::json_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
 
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -216612,7 +220841,7 @@ struct simdjson_result<rvv_vls::ondemand::json_type> : public rvv_vls::implement
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::json_type &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 };
 
@@ -216664,7 +220893,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline raw_json_string() noexcept = default;
+  simdjson_inline raw_json_string() noexcept {}
 
   /**
    * Create a new invalid raw_json_string pointed at the given location in the JSON.
@@ -216781,6 +221010,20 @@ private:
   }
 
   /**
+   * True when target is a compile-time constant that holds no quote character.
+   * Always false with compilers lacking __builtin_constant_p.
+   */
+  static simdjson_inline bool is_known_free_from_quote(std::string_view target) noexcept;
+
+  /**
+   * Compares the current instance, a key, to the std::string_view target: returns
+   * true if they are byte-by-byte equal (no escaping is done). Unlike
+   * unsafe_is_equal, target may hold unescaped quote characters: it then never
+   * matches. The key must be followed by the colon at `colon`.
+   */
+  simdjson_inline bool unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept;
+
+  /**
    * This will set the inner pointer to zero, effectively making
    * this instance unusable.
    */
@@ -216819,6 +221062,7 @@ private:
   friend class object;
   friend class field;
   friend class parser;
+  friend class value_iterator;
   friend struct simdjson_result<raw_json_string>;
 };
 
@@ -216845,7 +221089,7 @@ struct simdjson_result<rvv_vls::ondemand::raw_json_string> : public rvv_vls::imp
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::raw_json_string &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline ~simdjson_result() noexcept = default; ///< @private
 
   simdjson_inline simdjson_result<const char *> raw() const noexcept;
@@ -217307,6 +221551,10 @@ private:
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_parser_instance();
   /** Get the thread-local parser instance, it might be null */
   static simdjson_inline simdjson_warn_unused std::unique_ptr<ondemand::parser>& get_threadlocal_parser_if_exists();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  static simdjson_inline bool can_end_incomplete_json(uint8_t c) noexcept;
+  simdjson_warn_unused simdjson_inline error_code end_incomplete_json(padded_string_view json) noexcept;
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   /** @private [for benchmarking access] The implementation to use */
   std::unique_ptr<simdjson::internal::dom_parser_implementation> implementation{};
   size_t _capacity{0};
@@ -217314,6 +221562,10 @@ private:
   size_t _max_depth{DEFAULT_MAX_DEPTH};
   size_t _document_len{0};
   std::unique_ptr<uint8_t[]> string_buf{};
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  /** Copy of a scalar cut by the end of an incomplete document, see json_iterator::scalar_within_input(). */
+  uint8_t incomplete_scalar_buf[1074+8+1+SIMDJSON_PADDING]{};
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   std::unique_ptr<token_position[]> start_positions{};
@@ -217334,7 +221586,7 @@ struct simdjson_result<rvv_vls::ondemand::parser> : public rvv_vls::implementati
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::parser &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -217370,7 +221622,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline array() noexcept = default;
+  simdjson_inline array() noexcept {}
 
   /**
    * Begin array iteration.
@@ -217617,7 +221869,7 @@ struct simdjson_result<rvv_vls::ondemand::array> : public rvv_vls::implementatio
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::array &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<rvv_vls::ondemand::array_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<rvv_vls::ondemand::array_iterator> begin() && noexcept;
@@ -217698,7 +221950,7 @@ public:
   using reference = value_type;
 
   /** Create a new, invalid array iterator. */
-  simdjson_inline array_iterator() noexcept = default;
+  simdjson_inline array_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
   simdjson_inline ~array_iterator() noexcept;
@@ -217756,6 +222008,7 @@ private:
    simdjson_inline array_iterator(const value_iterator &_iter, array* _parent) noexcept;
 #endif
   value_iterator iter{};
+  token_position element_start{};
 
   simdjson_inline array_iterator(const value_iterator &iter) noexcept;
 
@@ -217780,7 +222033,7 @@ struct simdjson_result<rvv_vls::ondemand::array_iterator> : public rvv_vls::impl
 
   simdjson_inline simdjson_result(rvv_vls::ondemand::array_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -217830,7 +222083,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline document() noexcept = default;
+  simdjson_inline document() noexcept {}
   simdjson_inline document(const document &other) noexcept = delete; // pass your documents by reference, not by copy
   simdjson_inline document(document &&other) noexcept = default;
   simdjson_inline document &operator=(const document &other) noexcept = delete;
@@ -218953,7 +223206,7 @@ struct simdjson_result<rvv_vls::ondemand::document> : public rvv_vls::implementa
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::document &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<rvv_vls::ondemand::array> get_array() & noexcept;
@@ -219083,7 +223336,7 @@ template<>
 struct simdjson_result<rvv_vls::ondemand::document_reference> : public rvv_vls::implementation_simdjson_result_base<rvv_vls::ondemand::document_reference> {
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::document_reference value, error_code error) noexcept;
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
   simdjson_inline error_code rewind() noexcept;
 
   simdjson_inline simdjson_result<rvv_vls::ondemand::array> get_array() & noexcept;
@@ -219230,7 +223483,7 @@ namespace ondemand {
 #ifdef SIMDJSON_THREADS_ENABLED
 /** @private Custom worker class **/
 struct stage1_worker {
-  stage1_worker() noexcept = default;
+  stage1_worker() noexcept {}
   stage1_worker(const stage1_worker&) = delete;
   stage1_worker(stage1_worker&&) = delete;
   stage1_worker operator=(const stage1_worker&) = delete;
@@ -219580,7 +223833,7 @@ struct simdjson_result<rvv_vls::ondemand::document_stream> : public rvv_vls::imp
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::document_stream &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 };
 
 } // namespace simdjson
@@ -219708,7 +223961,7 @@ struct simdjson_result<rvv_vls::ondemand::field> : public rvv_vls::implementatio
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::field &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<std::string_view> unescaped_key(bool allow_replacement = false) noexcept;
 #if SIMDJSON_SUPPORTS_CHAR8_T
@@ -221252,7 +225505,7 @@ struct object_position {
    * Default-constructed so a variable can be declared and assigned later,
    * matching e.g. document()/object(). Not a valid position to revert to.
    */
-  simdjson_inline object_position() noexcept = default;
+  simdjson_inline object_position() noexcept {}
 
 private:
   token_position position{};
@@ -221274,7 +225527,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object() noexcept = default;
+  simdjson_inline object() noexcept {}
 
   /**
    * Get an iterator to the start of the object. We recommend using a range-based for loop.
@@ -221722,7 +225975,7 @@ struct simdjson_result<rvv_vls::ondemand::object> : public rvv_vls::implementati
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::object &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   simdjson_inline simdjson_result<rvv_vls::ondemand::object_iterator> begin() & noexcept;
   simdjson_inline simdjson_result<rvv_vls::ondemand::object_iterator> begin() && noexcept;
@@ -221841,7 +226094,7 @@ public:
    *
    * Exists so you can declare a variable and later assign to it before use.
    */
-  simdjson_inline object_iterator() noexcept = default;
+  simdjson_inline object_iterator() noexcept {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
    simdjson_inline ~object_iterator() noexcept;
@@ -221882,6 +226135,7 @@ private:
    * is first used, and never changes afterwards.
    */
   value_iterator iter{};
+  token_position value_start{};
 
   simdjson_inline object_iterator(const value_iterator &iter) noexcept;
   friend struct simdjson_result<object_iterator>;
@@ -221899,7 +226153,7 @@ struct simdjson_result<rvv_vls::ondemand::object_iterator> : public rvv_vls::imp
 public:
   simdjson_inline simdjson_result(rvv_vls::ondemand::object_iterator &&value) noexcept; ///< @private
   simdjson_inline simdjson_result(error_code error) noexcept; ///< @private
-  simdjson_inline simdjson_result() noexcept = default;
+  simdjson_inline simdjson_result() noexcept {}
 
   //
   // Iterator interface
@@ -221958,7 +226212,7 @@ public:
   using reference = simdjson_result<value>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline array_range_iterator() noexcept = default;
+  simdjson_inline array_range_iterator() noexcept {}
   simdjson_inline explicit array_range_iterator(array_iterator iter) noexcept;
 
   /**
@@ -222002,7 +226256,7 @@ private:
  */
 class array_range {
 public:
-  simdjson_inline array_range() noexcept = default;
+  simdjson_inline array_range() noexcept {}
   simdjson_inline explicit array_range(array& arr) noexcept;
 
   simdjson_inline array_range_iterator begin() noexcept;
@@ -222030,7 +226284,7 @@ public:
   using reference = simdjson_result<field>;
   using difference_type = std::ptrdiff_t;
 
-  simdjson_inline object_range_iterator() noexcept = default;
+  simdjson_inline object_range_iterator() noexcept {}
   simdjson_inline explicit object_range_iterator(object_iterator iter) noexcept;
 
   simdjson_inline simdjson_result<field> operator*() const noexcept;
@@ -222058,7 +226312,7 @@ private:
  */
 class object_range {
 public:
-  simdjson_inline object_range() noexcept = default;
+  simdjson_inline object_range() noexcept {}
   simdjson_inline explicit object_range(object& obj) noexcept;
 
   simdjson_inline object_range_iterator begin() noexcept;
@@ -222320,6 +226574,10 @@ error_code tag_invoke(deserialize_tag, auto &val, char &out) noexcept {
 // any string-like type (can be constructed from std::string_view)
 template <concepts::constructible_from_string_view T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(std::is_nothrow_constructible_v<T, std::string_view>) {
+  if constexpr (std::is_same_v<T, std::string>) {
+    // get_string(std::string&) has a faster path for short strings.
+    return val.get_string(out);
+  }
   std::string_view str;
   SIMDJSON_TRY(val.get_string().get(str));
   if constexpr (requires { out.assign(str.data(), str.size()); }) {
@@ -222373,6 +226631,16 @@ struct pop_back_guard {
     if (armed) { container.pop_back(); }
   }
 };
+
+// Empties the optional on destruction while armed.
+template <typename T>
+struct reset_guard {
+  T &optional;
+  bool armed{true};
+  ~reset_guard() {
+    if (armed) { optional.reset(); }
+  }
+};
 } // namespace details
 
 /**
@@ -222390,7 +226658,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified type inside the container must default constructible.");
+      "The specified type inside the container must be default constructible.");
   rvv_vls::ondemand::array arr;
   if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, rvv_vls::ondemand::array>) {
     arr = val;
@@ -222470,35 +226738,22 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
  * We want to support std::map and std::unordered_map but only for
  * string-keyed types.
  */
- template <concepts::string_view_keyed_map T, typename ValT>
+template <concepts::string_view_keyed_map T, typename ValT>
 error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
   using value_type = typename std::remove_cvref_t<T>::mapped_type;
   static_assert(
-     deserializable<value_type, ValT>,
-     "The specified value type inside the container must itself be deserializable");
+      deserializable<value_type, rvv_vls::ondemand::value>,
+      "The specified value type inside the container must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<value_type>,
-      "The specified value type inside the container must default constructible.");
- rvv_vls::ondemand::object obj;
- SIMDJSON_TRY(val.get_object().get(obj));
- for (auto field : obj) {
-    std::string_view key;
-    SIMDJSON_TRY(field.unescaped_key().get(key));
-    value_type this_value;
-    SIMDJSON_TRY(field.value().get<value_type>().get(this_value));
-    [[maybe_unused]] std::pair<typename T::iterator, bool> result = out.emplace(key, this_value);
-    // unclear what to do if the key already exists
-    // if (result.second == false) {
-    //   // key already exists
-    // }
- }
- (void)out;
- return SUCCESS;
-}
+      "The specified value type inside the container must be default constructible.");
 
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, rvv_vls::ondemand::object &obj, T &out) noexcept(false) {
-  using value_type = typename std::remove_cvref_t<T>::mapped_type;
+  rvv_vls::ondemand::object obj;
+  if constexpr (std::is_same_v<std::remove_cvref_t<ValT>, rvv_vls::ondemand::object>) {
+    obj = val;
+  } else {
+    SIMDJSON_TRY(val.get_object().get(obj));
+  }
 
   out.clear();
   for (auto field : obj) {
@@ -222513,27 +226768,6 @@ error_code tag_invoke(deserialize_tag, rvv_vls::ondemand::object &obj, T &out) n
     out.emplace(typename T::key_type(key), std::move(this_value));
   }
   return SUCCESS;
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, rvv_vls::ondemand::value &val, T &out) noexcept(false) {
-  rvv_vls::ondemand::object obj;
-  SIMDJSON_TRY(val.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, rvv_vls::ondemand::document &doc, T &out) noexcept(false) {
-  rvv_vls::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
-}
-
-template <concepts::string_view_keyed_map T>
-error_code tag_invoke(deserialize_tag, rvv_vls::ondemand::document_reference &doc, T &out) noexcept(false) {
-  rvv_vls::ondemand::object obj;
-  SIMDJSON_TRY(doc.get_object().get(obj));
-  return simdjson::deserialize(obj, out);
 }
 
 
@@ -222558,7 +226792,7 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
       "The specified type inside the unique_ptr must itself be deserializable");
   static_assert(
       std::is_default_constructible_v<element_type>,
-      "The specified type inside the unique_ptr must default constructible.");
+      "The specified type inside the unique_ptr must be default constructible.");
 
   // A null pointer is serialized as null.
   bool is_null_value;
@@ -222581,9 +226815,17 @@ error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(false) {
 /**
  * This CPO (Customization Point Object) will help deserialize into optional types.
  */
-template <concepts::optional_type T>
-error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, decltype(val)>) {
+template <concepts::optional_type T, typename ValT>
+error_code tag_invoke(deserialize_tag, ValT &val, T &out) noexcept(
+    nothrow_deserializable<typename std::remove_cvref_t<T>::value_type, std::remove_cvref_t<ValT>>) {
   using value_type = typename std::remove_cvref_t<T>::value_type;
+
+  static_assert(
+      deserializable<value_type, ValT>,
+      "The specified type inside the optional must itself be deserializable");
+  static_assert(
+      std::is_default_constructible_v<value_type>,
+      "The specified type inside the optional must be default constructible.");
 
   // Check if the value is null
   bool is_null_value;
@@ -222593,10 +226835,22 @@ error_code tag_invoke(deserialize_tag, auto &val, T &out) noexcept(nothrow_deser
     return SUCCESS;
   }
 
+  // On an error or an exception (a user tag_invoke may throw), out is left as
+  // it was: empty, or holding its previous value.
   if (!out) {
+    // Deserialize in place (no temporary to move, which matters for large
+    // types), and empty out again if that fails.
     out.emplace();
+    details::reset_guard<std::remove_cvref_t<T>> guard{out};
+    SIMDJSON_TRY(val.template get<value_type>(*out));
+    guard.armed = false;
+  } else {
+    // out holds a value: deserialize into a fresh value and replace it on
+    // success. (A container is thus replaced rather than appended to.)
+    value_type temp;
+    SIMDJSON_TRY(val.template get<value_type>(temp));
+    out.emplace(std::move(temp));
   }
-  SIMDJSON_TRY(val.template get<value_type>(out.value()));
   return SUCCESS;
 }
 
@@ -222618,6 +226872,8 @@ constexpr bool user_defined_type = (std::is_class_v<T>
 !concepts::appendable_containers<T>
 // Smart pointers are handled by the generic smart-pointer tag_invoke.
 && !concepts::smart_pointer<T>
+// String-keyed maps are handled by the generic string_view_keyed_map tag_invoke.
+&& !concepts::string_view_keyed_map<T>
 // simdjson's own types (array, object, value, raw_json_string, number,
 // document, document_reference) have dedicated get<T>() specializations and
 // must never go through reflection.
@@ -223386,15 +227642,12 @@ inline simdjson_result<value> array::at_pointer(std::string_view json_pointer) n
   size_t i;
   SIMDJSON_TRY(internal::parse_json_pointer_array_index(json_pointer, array_index, i));
   // Get the child
-  auto child = at(array_index);
+  value child;
   // If there is an error, it ends here
-  if(child.error()) {
-    return child;
-  }
-
+  SIMDJSON_TRY(at(array_index).get(child));
   // If there is a /, we're not done yet, call recursively.
   if (i < json_pointer.length()) {
-    child = child.at_pointer(json_pointer.substr(i));
+    return child.at_pointer(json_pointer.substr(i));
   }
   return child;
 }
@@ -223574,12 +227827,12 @@ namespace rvv_vls {
 namespace ondemand {
 
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter) noexcept
-  : iter{_iter}
+  : iter{_iter}, element_start{_iter.json_iter().position()}
 {}
 
 #if SIMDJSON_DEVELOPMENT_CHECKS
 simdjson_inline array_iterator::array_iterator(const value_iterator &_iter, array* _parent) noexcept
-  : parent{_parent}, iter{_iter}
+  : parent{_parent}, iter{_iter}, element_start{_iter.json_iter().position()}
 {
   if (parent) parent->set_locked(true);
 }
@@ -223592,7 +227845,8 @@ simdjson_inline array_iterator::~array_iterator() noexcept
 simdjson_inline array_iterator::array_iterator(array_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    element_start{other.element_start}
 {
   other.parent = nullptr;
 }
@@ -223605,6 +227859,7 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    element_start = other.element_start;
 
     other.parent = nullptr;
   }
@@ -223614,7 +227869,8 @@ simdjson_inline array_iterator& array_iterator::operator=(array_iterator&& other
 simdjson_inline array_iterator::array_iterator(const array_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    element_start{other.element_start}
 {}
 
 simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& other) noexcept {
@@ -223625,6 +227881,7 @@ simdjson_inline array_iterator& array_iterator::operator=(const array_iterator& 
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    element_start = other.element_start;
   }
   return *this;
 }
@@ -223652,8 +227909,9 @@ simdjson_inline array_iterator &array_iterator::operator++() noexcept {
   // PERF NOTE this is a safety rail ... users should exit loops as soon as they receive an error, so we'll never get here.
   // However, it does not seem to make a perf difference, so we add it out of an abundance of caution.
   if (( error = iter.error() )) { return *this; }
-  if (( error = iter.skip_child() )) { return *this; }
+  if (( error = iter.skip_child(element_start) )) { return *this; }
   if (( error = iter.has_next_element().error() )) { return *this; }
+  element_start = iter.json_iter().position();
   return *this;
 }
 
@@ -224108,6 +228366,7 @@ simdjson_inline simdjson_result<value> value::at_pointer(std::string_view json_p
 }
 
 simdjson_inline simdjson_result<value> value::at_path(std::string_view json_path) noexcept {
+  if (json_path == "$") { return value(iter); }
   json_type t;
   SIMDJSON_TRY(type().get(t));
   switch (t) {
@@ -224127,6 +228386,11 @@ template <typename Func>
 template <typename Func>
 #endif
 inline error_code value::for_each_at_path_with_wildcard(std::string_view json_path, Func&& callback) noexcept {
+  if (json_path == "$") {
+    value self(iter);
+    callback(self);
+    return SUCCESS;
+  }
   // The path is split once: every value reached by a wildcard sees the same
   // remaining path, so re-parsing it at each one would be quadratic.
   const std::vector<internal::json_path_segment> path = internal::split_json_path(json_path);
@@ -224922,6 +229186,14 @@ simdjson_inline simdjson_result<number> document::get_number() noexcept {
 
 simdjson_inline simdjson_result<std::string_view> document::raw_json_token() noexcept {
   auto _iter = get_root_value_iterator();
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (iter.allow_incomplete_json()) {
+    const uint32_t length = _iter.peek_root_length();
+    const size_t remaining_input_length = iter.remaining_input_length(_iter.peek_start());
+    return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()),
+        remaining_input_length < length ? uint32_t(remaining_input_length) : length);
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return std::string_view(reinterpret_cast<const char*>(_iter.peek_start()), _iter.peek_root_length());
 }
 
@@ -224949,7 +229221,7 @@ simdjson_inline simdjson_result<value> document::at_path(std::string_view json_p
   // Rewind the document each time at_path is called. After a fatal error,
   // the document cannot be walked again: we report the error instead.
   SIMDJSON_TRY(iter.rewind());
-  if (json_path.empty()) {
+  if (json_path.empty() || json_path == "$") {
       return this->get_value();
   }
   json_type t;
@@ -224976,6 +229248,12 @@ simdjson_inline error_code document::for_each_at_path_with_wildcard(std::string_
   SIMDJSON_TRY(iter.rewind());
   if (json_path.empty()) {
       return INVALID_JSON_POINTER;
+  }
+  if (json_path == "$") {
+    value root;
+    SIMDJSON_TRY(get_value().get(root));
+    callback(root);
+    return SUCCESS;
   }
   json_type t;
   SIMDJSON_TRY(type().get(t));
@@ -226307,6 +230585,77 @@ inline size_t document_stream::next_batch_start() const noexcept {
   return batch_start + parser->implementation->structural_indexes[parser->implementation->n_structural_indexes];
 }
 
+// Whether the documents in [pos, end) are well formed. Balanced brackets are not
+// enough: On-Demand may skip the ] in `[1,]` as a value.
+inline bool stream_documents_are_well_formed(const uint8_t *batch, const uint32_t *pos, const uint32_t *end) noexcept {
+  uint64_t is_object[16]{}; // one bit per open container, up to depth 1024
+  size_t depth = 0;
+  enum { value, first_value, key, first_key, colon, comma_or_close } expected = value;
+  for (; pos < end; pos++) {
+    const uint8_t c = batch[*pos];
+    if (expected == comma_or_close && depth == 0) { expected = value; } // next document
+    const bool in_object = depth > 0 && ((is_object[(depth - 1) / 64] >> ((depth - 1) % 64)) & 1);
+    switch (expected) {
+      case value: case first_value:
+        if (c == ']' && expected == first_value) { depth--; expected = comma_or_close; break; }
+        if (c == ',' || c == ':' || c == ']' || c == '}') { return false; }
+        expected = comma_or_close;
+        if (c == '[' || c == '{') {
+          if (depth == 1024) { return false; }
+          const uint64_t bit = uint64_t(1) << (depth % 64);
+          is_object[depth / 64] = (c == '{') ? (is_object[depth / 64] | bit) : (is_object[depth / 64] & ~bit);
+          depth++;
+          expected = (c == '{') ? first_key : first_value;
+        }
+        break;
+      case key: case first_key:
+        if (c == '}' && expected == first_key) { depth--; expected = comma_or_close; break; }
+        if (c != '"') { return false; }
+        expected = colon;
+        break;
+      case colon:
+        if (c != ':') { return false; }
+        expected = value;
+        break;
+      case comma_or_close:
+        if (c == ',') { expected = in_object ? key : value; break; }
+        if (c != (in_object ? '}' : ']')) { return false; }
+        depth--;
+        break;
+    }
+  }
+  return depth == 0 && expected == comma_or_close;
+}
+
+// If the byte past the batch could continue its last document, end the batch
+// before an invalid tail, so that On-Demand cannot read past it. Once per batch.
+simdjson_never_inline error_code end_batch_before_invalid_tail(internal::dom_parser_implementation &impl, const uint8_t *batch) noexcept {
+  const uint32_t n = impl.n_structural_indexes;
+  if (n == 0) { return SUCCESS; }
+  const uint32_t *const first = impl.structural_indexes.get();
+  const uint32_t *const end = first + n;
+  const uint8_t next = batch[*end];
+  const uint8_t last = batch[*(end - 1)];
+  if (!(next == ',' || next == ':' || next == ']' || next == '}' ||
+        last == ',' || last == ':' || last == '[' || last == '{')) {
+    return SUCCESS;
+  }
+  const uint32_t *start = end - 1;
+  for (; start > first; start--) {
+    const uint8_t c = batch[*start];
+    const uint8_t previous = batch[*(start - 1)];
+    if (c != ',' && c != ':' && c != ']' && c != '}' &&
+        previous != '[' && previous != '{' && previous != ',' && previous != ':') {
+      break;
+    }
+  }
+  if (stream_documents_are_well_formed(batch, start, end)) { return SUCCESS; }
+  if (start == first) { return TAPE_ERROR; }
+  impl.n_structural_indexes = uint32_t(start - first);
+  impl.structural_indexes[impl.n_structural_indexes + 1] = *start; // for truncated_bytes()
+  return SUCCESS;
+}
+
 inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch_start) noexcept {
   // This code only updates the structural index in the parser, it does not update any json_iterator
   // instance.
@@ -226325,7 +230674,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_final;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], remaining, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   } else {
     // Partial batch
     switch (format) {
@@ -226339,7 +230689,8 @@ inline error_code document_stream::run_stage1(ondemand::parser &p, size_t _batch
         mode = stage1_mode::streaming_partial;
         break;
     }
-    return p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    error_code err = p.implementation->stage1(&buf[_batch_start], batch_size, mode);
+    return err ? err : end_batch_before_invalid_tail(*p.implementation, &buf[_batch_start]);
   }
 }
 
@@ -226556,10 +230907,10 @@ simdjson_inline simdjson_warn_unused simdjson_result<std::u8string_view> field::
 
 template <typename string_type>
 simdjson_inline simdjson_warn_unused error_code field::unescaped_key(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view key;
-  SIMDJSON_TRY( unescaped_key(allow_replacement).get(key) );
-  internal::assign_utf8(receiver, key);
-  return SUCCESS;
+  SIMDJSON_ASSUME(first.buf != nullptr); // We would like to call .alive() but Visual Studio won't let us.
+  error_code key_error = second.iter.json_iter().unescape(first, receiver, allow_replacement);
+  first.consume();
+  return key_error;
 }
 
 simdjson_inline raw_json_string field::key() const noexcept {
@@ -226791,61 +231142,54 @@ static constexpr int8_t skip_depth_delta[256] = {
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 };
 
+// Class of the first token of a value: 0 for a scalar, 1 for an array or an object, 2 for a
+// token that cannot start a value.
+static constexpr uint8_t value_start_class[256] = {
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,2,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+};
+
+simdjson_inline bool json_iterator::out_of_place(uint8_t current) const noexcept {
+  // A value or a key follows a colon, a comma or an opening bracket; nothing else does.
+  if (_depth <= 1) { return false; }
+  const uint8_t before = *peek(-2) | 0x20;
+  const bool after_start = before == ':' || before == ',' || before == '{';
+  current |= 0x20;
+  const bool ends = current == ':' || current == ',' || current == '}';
+  return after_start == ends;
+}
+
+simdjson_inline error_code json_iterator::out_of_place_error() noexcept {
+  return report_error(TAPE_ERROR, "Missing comma, colon or value");
+}
+
+simdjson_never_inline bool json_iterator::string_is_key(const uint8_t *json, token_position pos, token_position root, token_position end) noexcept {
+  // The string before pos is followed by a colon. After a colon or a bracket, it is a value;
+  // after a comma, it is a key if its container is an object.
+  const uint8_t before = pos - 2 >= root ? json[pos[-2]] : ':';
+  if (before == '{') { return true; }
+  if (before == ':' || before == '[') { return false; }
+  int32_t depth = 0;
+  while (pos < end) {
+    const uint8_t c = json[*pos++];
+    depth += skip_depth_delta[c];
+    if (depth < 0) { return c == '}'; }
+  }
+  return true;
+}
+
 // GCC 7 warns when the first line of this function is inlined away into oblivion due to the caller
 // relating depth and parent_depth, which is a desired effect. The warning does not show up if the
 // skip_child() function is not marked inline).
 SIMDJSON_PUSH_DISABLE_WARNINGS
 SIMDJSON_DISABLE_STRICT_OVERFLOW_WARNING
-simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
-  if (depth() <= parent_depth) { return SUCCESS; }
-  switch (*return_current_and_advance()) {
-    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
-    // *missing* braces, then future lookups are not in the object/arrays they think they are,
-    // violating the rule "validate enough structure that the user can be confident they are
-    // looking at the right values."
-    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
-
-    // For the first open array/object in a value, we've already incremented depth, so keep it the same
-    // We never stop at colon, but if we did, it wouldn't affect depth
-    case '[': case '{': case ':':
-      logger::log_start_value(*this, "skip");
-      break;
-    // If there is a comma, we have just finished a value in an array/object, and need to get back in
-    case ',':
-      logger::log_value(*this, "skip");
-      break;
-    // ] or } means we just finished a value and need to jump out of the array/object
-    case ']': case '}':
-      logger::log_end_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-#if SIMDJSON_CHECK_EOF
-      // If there are no more tokens, the parent is incomplete.
-      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
-#endif // SIMDJSON_CHECK_EOF
-      break;
-    case '"':
-      // At the end, peek() would read the sentinel, which points into the padding.
-      if(!at_end() && *peek() == ':') {
-        // We are at a key!!!
-        // This might happen if you just started an object and you skip it immediately.
-        // Performance note: it would be nice to get rid of this check as it is somewhat
-        // expensive.
-        // https://github.com/simdjson/simdjson/issues/1742
-        logger::log_value(*this, "key");
-        return_current_and_advance(); // eat up the ':'
-        break; // important!!!
-      }
-      simdjson_fallthrough;
-    // Anything else must be a scalar value
-    default:
-      // For the first scalar, we will have incremented depth already, so we decrement it here.
-      logger::log_value(*this, "skip");
-      _depth--;
-      if (depth() <= parent_depth) { return SUCCESS; }
-      break;
-  }
-
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_rest(depth_t parent_depth) noexcept {
   // Now that we've considered the first value, we only increment/decrement for arrays/objects.
   //
   // Without logging, look up the depth change of each token in a table instead of branching
@@ -226895,6 +231239,116 @@ simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_
   return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "not enough close braces");
 }
 
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_child(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  const uint8_t current = *return_current_and_advance();
+  if (simdjson_unlikely(out_of_place(current))) { return out_of_place_error(); }
+  switch (current) {
+    // TODO consider whether matching braces is a requirement: if non-matching braces indicates
+    // *missing* braces, then future lookups are not in the object/arrays they think they are,
+    // violating the rule "validate enough structure that the user can be confident they are
+    // looking at the right values."
+    // PERF TODO we can eliminate the switch here with a lookup of how much to add to depth
+
+    // For the first open array/object in a value, we've already incremented depth, so keep it the same
+    // We never stop at colon, but if we did, it wouldn't affect depth
+    case '[': case '{': case ':':
+      logger::log_start_value(*this, "skip");
+      break;
+    // If there is a comma, we have just finished a value in an array/object, and need to get back in
+    case ',':
+      logger::log_value(*this, "skip");
+      break;
+    // ] or } means we just finished a value and need to jump out of the array/object
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+#if SIMDJSON_CHECK_EOF
+      // If there are no more tokens, the parent is incomplete.
+      if (at_end()) { return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing [ or { at start"); }
+#endif // SIMDJSON_CHECK_EOF
+      break;
+    case '"':
+      // At the end, peek() would read the sentinel, which points into the padding.
+      if(!at_end() && *peek() == ':' && string_is_key(token.buf, token.position(), _root, end_position())) {
+        // We are at a key!!!
+        // This might happen if you just started an object and you skip it immediately.
+        // Performance note: it would be nice to get rid of this check as it is somewhat
+        // expensive.
+        // https://github.com/simdjson/simdjson/issues/1742
+        logger::log_value(*this, "key");
+        return_current_and_advance(); // eat up the ':'
+        break; // important!!!
+      }
+      if (_depth > 1 && *peek(-2) == '{') {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        if (allow_incomplete_json() && at_end()) {
+          return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+        }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+        return out_of_place_error();
+      }
+      simdjson_fallthrough;
+    // Anything else must be a scalar value
+    default:
+      // For the first scalar, we will have incremented depth already, so we decrement it here.
+      logger::log_value(*this, "skip");
+      _depth--;
+      if (depth() <= parent_depth) { return SUCCESS; }
+      break;
+  }
+
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_value(depth_t parent_depth) noexcept {
+  const uint8_t value_class = value_start_class[*return_current_and_advance()];
+  if (value_class == 0) {
+    logger::log_value(*this, "skip");
+    _depth--;
+    return SUCCESS;
+  }
+  if (value_class == 2) { return out_of_place_error(); }
+  logger::log_start_value(*this, "skip");
+  return skip_rest(parent_depth);
+}
+
+simdjson_warn_unused simdjson_inline error_code json_iterator::skip_partial(depth_t parent_depth) noexcept {
+  if (depth() <= parent_depth) { return SUCCESS; }
+  if (depth() != parent_depth + 1) { return skip_child(parent_depth); }
+  // We are in the child container, past its start: at a key, a colon, a comma or the closing
+  // bracket. Another value can only follow a missing comma.
+  switch (*return_current_and_advance()) {
+    case ',': case ':':
+      logger::log_value(*this, "skip");
+      return skip_rest(parent_depth);
+    case ']': case '}':
+      logger::log_end_value(*this, "skip");
+      _depth--;
+      return SUCCESS;
+    case '"':
+      if (!at_end() && *peek() == ':') {
+        logger::log_value(*this, "key");
+        return_current_and_advance();
+        return skip_rest(parent_depth);
+      }
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (allow_incomplete_json() && at_end()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object key cut before its colon");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      simdjson_fallthrough;
+    default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (simdjson_unlikely(allow_incomplete_json() && position() > end_position())) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Value cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      return out_of_place_error();
+  }
+}
+
 SIMDJSON_POP_DISABLE_WARNINGS
 
 simdjson_inline bool json_iterator::at_root() const noexcept {
@@ -226918,6 +231372,20 @@ simdjson_inline size_t json_iterator::remaining_input_length(const uint8_t *json
   const uint8_t *end = token.buf + parser->_document_len;
   return json < end ? size_t(end - json) : 0;
 }
+
+simdjson_inline const uint8_t *json_iterator::scalar_within_input(const uint8_t *json) noexcept {
+  // Only the last token can run to the end of the input.
+  const uint32_t n = parser->implementation->n_structural_indexes;
+  if (simdjson_likely(json != token.buf + parser->implementation->structural_indexes[n - 1])) { return json; }
+  uint8_t *tmpbuf = parser->incomplete_scalar_buf;
+  constexpr size_t capacity = sizeof(parser->incomplete_scalar_buf) - SIMDJSON_PADDING;
+  const size_t length = remaining_input_length(json);
+  // A scalar too long for the buffer is left out entirely, so that it does not parse.
+  const size_t copied = length <= capacity ? length : 0;
+  std::memcpy(tmpbuf, json, copied);
+  std::memset(tmpbuf + copied, ' ', sizeof(parser->incomplete_scalar_buf) - copied);
+  return tmpbuf;
+}
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
 simdjson_inline token_position json_iterator::root_position() const noexcept {
@@ -226938,6 +231406,12 @@ simdjson_inline void json_iterator::assert_at_root() const noexcept {
 }
 
 simdjson_inline void json_iterator::assert_more_tokens(uint32_t required_tokens) const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (allow_incomplete_json()) {
+    SIMDJSON_ASSUME( token._position + required_tokens - 1 <= end_position() );
+    return;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   assert_valid_position(token._position + required_tokens - 1);
 }
 
@@ -227093,6 +231567,46 @@ simdjson_inline simdjson_result<std::string_view> json_iterator::unescape(raw_js
 #else
   return parser->unescape(in, _string_buf_loc, allow_replacement);
 #endif
+}
+
+template <typename string_type>
+simdjson_warn_unused simdjson_inline error_code json_iterator::unescape(raw_json_string in, string_type& receiver, bool allow_replacement) noexcept {
+// The inline capacity of std::string must be known at compile time, hence constexpr std::string.
+#if SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+  if constexpr (std::is_same_v<string_type, std::string>) {
+    // Short strings without escapes go into the string's inline (SSO) buffer with two overlapping
+    // copies of fixed size. A memcpy of the exact length is much slower here, because its branches
+    // on the length mispredict. Like parse_string, this reads past the closing quote into the padding.
+    constexpr size_t sso_capacity = std::string().capacity(); // 22 with libc++, 15 with libstdc++ and MSVC
+    constexpr size_t chunk = sso_capacity >= 16 ? 16 : 8;
+    if constexpr (sso_capacity >= chunk && sso_capacity <= 2 * chunk) {
+      const uint8_t *const start = reinterpret_cast<const uint8_t *>(in.raw());
+      uint8_t scratch[backslash_and_quote::BYTES_PROCESSED];
+      for (size_t offset = 0; offset <= sso_capacity; offset += backslash_and_quote::BYTES_PROCESSED) {
+        auto bs_quote = backslash_and_quote{}.copy_and_find(start + offset, scratch);
+        if (bs_quote.has_quote_first()) {
+          const size_t length = offset + size_t(bs_quote.quote_index());
+          if (length > sso_capacity) { break; }
+          receiver.resize_and_overwrite(sso_capacity, [&](char *dst, size_t) noexcept {
+            std::memcpy(dst, start, chunk);
+            std::memcpy(dst + sso_capacity - chunk, start + sso_capacity - chunk, chunk);
+            return length;
+          });
+          return SUCCESS;
+        }
+        if (bs_quote.has_backslash()) { break; }
+      }
+    }
+  }
+#endif // SIMDJSON_SUPPORTS_RESIZE_AND_OVERWRITE && SIMDJSON_SUPPORTS_CONSTEXPR_STRING
+
+  // Anything else: unescape into the string buffer, copy it out, then give the buffer space back.
+  auto saved_string_buf_loc = _string_buf_loc;
+  std::string_view content;
+  SIMDJSON_TRY( unescape(in, allow_replacement).get(content) );
+  internal::assign_utf8(receiver, content);
+  _string_buf_loc = saved_string_buf_loc;
+  return SUCCESS;
 }
 
 simdjson_inline simdjson_result<std::string_view> json_iterator::unescape_wobbly(raw_json_string in) noexcept {
@@ -227694,7 +232208,7 @@ simdjson_flatten simdjson_inline for_each_result object::for_each(Func&& on_matc
     if (!it.is_open()) { break; }
     // Skip the value (a no-op if the callback consumed it) and step to the next
     // field; has_next_field() ends the container on '}', which closes the loop.
-    if ((error = it.skip_child())) { it.abandon(); return {error, matched}; }
+    if ((error = it.skip_field_child())) { it.abandon(); return {error, matched}; }
     if ((error = it.has_next_field().error())) { return {error, matched}; }
   }
   return {SUCCESS, matched};
@@ -227852,7 +232366,8 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
   size_t slash = json_pointer.find('/');
   std::string_view key = json_pointer.substr(0, slash);
   // Grab the child with the given key
-  simdjson_result<value> child;
+  value child;
+  error_code error;
 
   // If there is an escape character in the key, unescape it and then get the child.
   size_t escape = key.find('~');
@@ -227872,16 +232387,16 @@ inline simdjson_result<value> object::at_pointer(std::string_view json_pointer) 
       }
       escape = unescaped.find('~', escape+1);
     } while (escape != std::string::npos);
-    child = find_field(unescaped);  // Take note find_field does not unescape keys when matching
+    error = find_field(unescaped).get(child);  // Take note find_field does not unescape keys when matching
   } else {
-    child = find_field(key);
+    error = find_field(key).get(child);
   }
-  if(child.error()) {
-    return child; // we do not continue if there was an error
+  if(error) {
+    return error; // we do not continue if there was an error
   }
   // If there is a /, we have to recurse and look up more of the path
   if (slash != std::string_view::npos) {
-    child = child.at_pointer(json_pointer.substr(slash));
+    return child.at_pointer(json_pointer.substr(slash));
   }
   return child;
 }
@@ -228241,7 +232756,8 @@ simdjson_inline object_iterator::~object_iterator() noexcept
 simdjson_inline object_iterator::object_iterator(object_iterator&& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{other.parent},
-    iter{std::move(other.iter)}
+    iter{std::move(other.iter)},
+    value_start{other.value_start}
 {
   other.parent = nullptr;
 }
@@ -228254,6 +232770,7 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
     has_been_referenced = other.has_been_referenced;
     parent = other.parent;
     iter = std::move(other.iter);
+    value_start = other.value_start;
 
     other.parent = nullptr;
   }
@@ -228263,7 +232780,8 @@ simdjson_inline object_iterator& object_iterator::operator=(object_iterator&& ot
 simdjson_inline object_iterator::object_iterator(const object_iterator& other) noexcept
   : has_been_referenced{other.has_been_referenced},
     parent{nullptr},
-    iter{other.iter}
+    iter{other.iter},
+    value_start{other.value_start}
 {}
 
 simdjson_inline object_iterator& object_iterator::operator=(const object_iterator& other) noexcept {
@@ -228274,6 +232792,7 @@ simdjson_inline object_iterator& object_iterator::operator=(const object_iterato
     has_been_referenced = other.has_been_referenced;
     parent = nullptr;
     iter = other.iter;
+    value_start = other.value_start;
   }
   return *this;
 }
@@ -228288,6 +232807,7 @@ simdjson_inline simdjson_result<field> object_iterator::operator*() noexcept {
   error_code error = iter.error();
   if (error) { iter.abandon(); return error; }
   auto result = field::start(iter);
+  value_start = iter.json_iter().position();
   // TODO this is a safety rail ... users should exit loops as soon as they receive an error.
   // Nonetheless, let's see if performance is OK with this if statement--the compiler may give it to us for free.
   if (result.error()) { iter.abandon(); }
@@ -228313,7 +232833,7 @@ simdjson_inline object_iterator &object_iterator::operator++() noexcept {
   if (!iter.is_open()) { return *this; } // Iterator will be released if there is an error
 
   simdjson_unused error_code error;
-  if ((error = iter.skip_child() )) { return *this; }
+  if ((error = iter.skip_child(value_start) )) { return *this; }
 
   simdjson_unused bool has_value;
   if ((error = iter.has_next_field().get(has_value) )) { return *this; };
@@ -228573,25 +233093,37 @@ simdjson_inline parser::parser(size_t max_capacity) noexcept
 }
 
 simdjson_warn_unused simdjson_inline error_code parser::allocate(size_t new_capacity, size_t new_max_depth) noexcept {
+  // Reject an invalid depth before touching anything, as the implementation
+  // would: a failed allocate() leaves the parser as it was.
+  if (new_max_depth == 0 || new_max_depth > SIMDJSON_MAX_DEPTH) { return CAPACITY; }
   if (new_capacity > max_capacity()) { return CAPACITY; }
   if (string_buf && new_capacity <= capacity() && new_max_depth <= max_depth()) { return SUCCESS; }
 
   // string_capacity copied from document::allocate
-  _capacity = 0;
-  if(5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
+  if (5 * (new_capacity / 3) + SIMDJSON_PADDING < SIMDJSON_PADDING) {
     return CAPACITY; // overflow, only happen on legacy 32-bit systems with very large capacity
   }
   size_t string_capacity = SIMDJSON_ROUNDUP_N(5 * (new_capacity / 3) + SIMDJSON_PADDING, 64);
-  string_buf.reset(new (std::nothrow) uint8_t[string_capacity]);
+  std::unique_ptr<uint8_t[]> new_string_buf(new (std::nothrow) uint8_t[string_capacity]);
+  if (!new_string_buf) { return MEMALLOC; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
-  start_positions.reset(new (std::nothrow) token_position[new_max_depth]);
+  std::unique_ptr<token_position[]> new_start_positions(new (std::nothrow) token_position[new_max_depth]);
+  if (!new_start_positions) { return MEMALLOC; }
 #endif
   if (implementation) {
-    SIMDJSON_TRY( implementation->set_capacity(new_capacity) );
-    SIMDJSON_TRY( implementation->set_max_depth(new_max_depth) );
+    error_code err = implementation->allocate(new_capacity, new_max_depth);
+    if (err) { return err; }
   } else {
-    SIMDJSON_TRY( simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation) );
+    error_code err = simdjson::get_active_implementation()->create_dom_parser_implementation(new_capacity, new_max_depth, implementation);
+    if (err) {
+      implementation.reset();
+      return err;
+    }
   }
+  string_buf = std::move(new_string_buf);
+#if SIMDJSON_DEVELOPMENT_CHECKS
+  start_positions = std::move(new_start_positions);
+#endif
   _capacity = new_capacity;
   _max_depth = new_max_depth;
   return SUCCESS;
@@ -228638,7 +233170,40 @@ simdjson_warn_unused simdjson_inline simdjson_result<document> parser::iterate_a
     if (err != UNCLOSED_STRING)
       return err;
   }
-  return document::start({ reinterpret_cast<const uint8_t *>(json.data()), this, true });
+  SIMDJSON_TRY( end_incomplete_json(json) );
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const uint8_t first = buf[implementation->structural_indexes[0]];
+  const bool lone_container = implementation->n_structural_indexes == 1 && (first == '{' || first == '[');
+  return document::start({ buf, this, !lone_container });
+}
+
+simdjson_inline bool parser::can_end_incomplete_json(uint8_t c) noexcept {
+  return c != '"' && c != ',' && c != ']' && c != '}';
+}
+
+simdjson_warn_unused simdjson_inline error_code parser::end_incomplete_json(padded_string_view json) noexcept {
+  const uint8_t *buf = reinterpret_cast<const uint8_t *>(json.data());
+  const size_t len = json.length();
+  uint32_t *indexes = implementation->structural_indexes.get();
+  uint32_t n = implementation->n_structural_indexes;
+  while (n > 1) {
+    const uint8_t last = buf[indexes[n - 1]];
+    if (last != ',' && last != ':' && last != '[' && last != '{') { break; }
+    n--;
+  }
+  implementation->n_structural_indexes = n;
+  indexes[n] = uint32_t(len);
+  indexes[n + 1] = uint32_t(len);
+  indexes[n + 2] = 0;
+  const uint8_t first = buf[indexes[0]];
+  if (n == 1 && first != '{' && first != '[') { return SUCCESS; }
+  if (simdjson_likely(can_end_incomplete_json(buf[len]))) { return SUCCESS; }
+  size_t end = len + 1;
+  while (end < len + SIMDJSON_PADDING && !can_end_incomplete_json(buf[end])) { end++; }
+  if (end == len + SIMDJSON_PADDING) { return INSUFFICIENT_PADDING; }
+  indexes[n] = uint32_t(end);
+  indexes[n + 1] = uint32_t(end);
+  return SUCCESS;
 }
 #endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
 
@@ -228908,7 +233473,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(std::string_v
   while(pos < target.size()) {
     pos = target.find('"', pos);
     if(pos == std::string_view::npos) { return true; }
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -228928,7 +233493,7 @@ simdjson_inline bool raw_json_string::is_free_from_unescaped_quote(const char* t
     const char * result = strchr(target+pos, '"');
     if(result == nullptr) { return true; }
     pos = result - target;
-    if(pos != 0 && target[pos-1] != '\\') { return false; }
+    if(pos == 0 || target[pos-1] != '\\') { return false; }
     if(pos > 1 && target[pos-2] == '\\') {
       size_t backslash_count{2};
       for(size_t i = 3; i <= pos; i++) {
@@ -228958,6 +233523,40 @@ simdjson_inline bool raw_json_string::unsafe_is_equal(std::string_view target) c
   // Past SIMDJSON_PADDING we can no longer rely on the padding to keep the
   // comparison in bounds, so we must stop at the quote terminating the key.
   return is_equal(target);
+}
+
+simdjson_inline bool raw_json_string::is_known_free_from_quote(std::string_view target) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+  // Copy the size first: GCC folds __builtin_constant_p of an expression
+  // holding a function call to false before inlining. When target is a
+  // compile-time constant, the size is a constant and the scan below folds
+  // away. Otherwise we return false, and the scan is never emitted.
+  const size_t size{target.size()};
+  if(!__builtin_constant_p(size)) { return false; }
+  bool has_quote{false};
+  for(char c : target) { has_quote |= (c == '"'); }
+  return !has_quote;
+#else
+  (void)target;
+  return false;
+#endif
+}
+
+simdjson_inline bool raw_json_string::unsafe_is_equal_key(std::string_view target, const uint8_t *colon) const noexcept {
+  // Past SIMDJSON_PADDING, is_equal stops at the quote terminating the key.
+  if(target.size() > SIMDJSON_PADDING) { return is_equal(target); }
+  const char * quote{raw() + target.size()};
+  if((*quote != '"') || memcmp(raw(), target.data(), target.size())) { return false; }
+  // The bytes of target are followed by a quote. Only whitespace separates the
+  // quote closing the key from the colon: a quote right before the colon
+  // therefore closes the key, and target is the key.
+  const char * c{reinterpret_cast<const char *>(colon)};
+  if(simdjson_likely(quote + 1 == c)) { return true; }
+  // Otherwise there is whitespace before the colon, or the quote is escaped
+  // (target ends with an unpaired backslash), or target holds an unescaped
+  // quote: its bytes then run past the quote closing the key, and so past
+  // the colon, which can only be followed by whitespace before a quote.
+  return (quote < c) && !escapes_trailing_quote(target);
 }
 
 simdjson_inline bool raw_json_string::is_equal(std::string_view target) const noexcept {
@@ -229261,13 +233860,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::start
   if (size_t(_depth) >= _json_iter->parser->max_depth()) { return report_error(DEPTH_ERROR, "Exceeded max depth!"); }
   _json_iter->set_start_position(_depth, start_position());
 #endif
-  if (*_json_iter->peek() == '}') {
+  // skip_child() relies on a started object beginning with a key.
+  const uint8_t *first = _json_iter->peek();
+  if (simdjson_likely(*first == '"')) { return true; }
+  if (*first == '}') {
     logger::log_value(*_json_iter, "empty object");
     _json_iter->return_current_and_advance();
     SIMDJSON_TRY(end_container());
     return false;
   }
-  return true;
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json() && _json_iter->end_position() - _json_iter->position() <= 1) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Object cut before its first key");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  abandon();
+  return report_error(TAPE_ERROR, "Object does not start with a key");
 }
 
 simdjson_warn_unused simdjson_inline error_code value_iterator::check_root_object() noexcept {
@@ -229327,8 +233935,22 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
     case ',':
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between object fields");
   }
+}
+
+simdjson_inline bool value_iterator::key_matches(raw_json_string actual_key, std::string_view key) const noexcept {
+  // A key known at compile time to hold no quote cannot run past actual_key:
+  // the usual comparison is then exact, and the cheapest.
+  if (raw_json_string::is_known_free_from_quote(key)) { return actual_key.unsafe_is_equal(key); }
+  // Otherwise, the colon we just checked bounds actual_key, so that a key
+  // holding an unescaped quote cannot match the JSON after it.
+  return actual_key.unsafe_is_equal_key(key, _json_iter->peek(-1));
 }
 
 simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_field_raw(const std::string_view key) noexcept {
@@ -229380,7 +234002,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   //    ```
   //
   } else {
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
     if (_json_iter->start_position(_depth) != start_position()) { return OUT_OF_ORDER_ITERATION; }
@@ -229389,8 +234011,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
   while (has_value) {
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -229398,14 +234018,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // key and the value. It will also increment the depth by one.
     if ((error = field_value() )) { abandon(); return error; }
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    //if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -229413,9 +234026,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() ); // Skip the value entirely
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -229495,7 +234108,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     // If someone queried a key but they not did access the value, then we are left pointing
     // at the ':' and we need to move forward through the value... If the value was
     // processed then skip_child() does not move the iterator (but may adjust the depth).
-    if ((error = skip_child() )) { abandon(); return error; }
+    if ((error = skip_field_child() )) { abandon(); return error; }
     search_start = _json_iter->position();
     if ((error = has_next_field().get(has_value) )) { abandon(); return error; }
 #if SIMDJSON_DEVELOPMENT_CHECKS
@@ -229522,8 +234135,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     if ((error = field_key().get(actual_key) )) { abandon(); return error; };
@@ -229532,14 +234143,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     if ((error = field_value() )) { abandon(); return error; }
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -229547,9 +234151,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // The has_next_field() advances the pointer and check that either ',' or '}' is found.
     // It returns true if ',' is found, false otherwise. If anything other than ',' or '}' is found,
     // then we are in error and we abort.
@@ -229572,8 +234176,6 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // Get the key and colon, stopping at the value.
     raw_json_string actual_key;
-    // size_t max_key_length = _json_iter->peek_length() - 2; // -2 for the two quotes
-    // Note: _json_iter->peek_length() - 2 might overflow if _json_iter->peek_length() < 2.
     // field_key() advances the pointer and checks that '"' is found (corresponding to a key).
     // The depth is left unchanged by field_key().
     error = field_key().get(actual_key); SIMDJSON_ASSUME(!error);
@@ -229582,14 +234184,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
     error = field_value(); SIMDJSON_ASSUME(!error);
 
     // If it matches, stop and return
-    // We could do it this way if we wanted to allow arbitrary
-    // key content (including escaped quotes).
-    // if (actual_key.unsafe_is_equal(max_key_length, key)) {
-    // Instead we do the following which may trigger buffer overruns if the
-    // user provides an adversarial key (containing a well placed unescaped quote
-    // character and being longer than the number of bytes remaining in the JSON
-    // input).
-    if (actual_key.unsafe_is_equal(key)) {
+    if (key_matches(actual_key, key)) {
       logger::log_event(*this, "match", key, -2);
       // If we return here, then we return while pointing at the ':' that we just checked.
       return true;
@@ -229597,9 +234192,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::find_
 
     // No match: skip the value and see if , or } is next
     logger::log_event(*this, "no match", key, -2);
-    // The call to skip_child is meant to skip over the value corresponding to the key.
-    // After skip_child(), we are right before the next comma (',') or the final brace ('}').
-    SIMDJSON_TRY( skip_child() );
+    // The call to skip_field_value is meant to skip over the value corresponding to the key.
+    // After skip_field_value(), we are right before the next comma (',') or the final brace ('}').
+    if ((error = skip_field_value() )) { _json_iter->_depth = 0; return error; }
     // If we reached the end of the key-value pair we started from, then we know
     // that the key is not there so we return false. We are either right before
     // the next comma or the final brace.
@@ -229644,6 +234239,14 @@ simdjson_warn_unused simdjson_inline error_code value_iterator::field_key_with_l
 simdjson_warn_unused simdjson_inline error_code value_iterator::field_value() noexcept {
   assert_at_next();
 
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  // An incomplete document may end with a key, possibly cut before its closing
+  // quote. The next token is then the end-of-input sentinel, which points at the
+  // byte past the input: it must not be taken for the colon.
+  if (_json_iter->allow_incomplete_json() && _json_iter->at_end()) {
+    return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Missing colon at the end of an incomplete document");
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (*_json_iter->return_current_and_advance() != ':') { return report_error(TAPE_ERROR, "Missing colon in object field"); }
   _json_iter->descend_to(depth()+1);
   return SUCCESS;
@@ -229734,6 +234337,11 @@ simdjson_warn_unused simdjson_inline simdjson_result<bool> value_iterator::has_n
       _json_iter->descend_to(depth()+1);
       return true;
     default:
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+      if (_json_iter->allow_incomplete_json() && _json_iter->position() > _json_iter->end_position()) {
+        return report_error(INCOMPLETE_ARRAY_OR_OBJECT, "Container cut at the end of an incomplete document");
+      }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
       return report_error(TAPE_ERROR, "Missing comma between array elements");
   }
 }
@@ -229757,15 +234365,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_string(string_type& receiver, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_string(allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_raw_json_string().get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_wobbly_string() noexcept {
   return get_raw_json_string().unescape_wobbly(json_iter());
@@ -229776,8 +234378,7 @@ simdjson_warn_unused simdjson_inline simdjson_result<raw_json_string> value_iter
 #ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (_json_iter->allow_incomplete_json()) {
     const size_t remaining_input_length = _json_iter->remaining_input_length(json);
-    const uint32_t max_len = remaining_input_length < peek_start_length() ? uint32_t(remaining_input_length) : peek_start_length();
-    if (!raw_json_string_is_quote_terminated(json, max_len)) {
+    if (!raw_json_string_is_quote_terminated(json, uint32_t(remaining_input_length))) {
       return STRING_ERROR;
     }
   }
@@ -229926,15 +234527,9 @@ simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_ite
 }
 template <typename string_type>
 simdjson_warn_unused simdjson_inline error_code value_iterator::get_root_string(string_type& receiver, bool check_trailing, bool allow_replacement) noexcept {
-  std::string_view content;
-  // Save the string buffer location so that we can restore it after get_string
-  auto saved_string_buf_loc = _json_iter->string_buf_loc();
-  auto err = get_root_string(check_trailing, allow_replacement).get(content);
-  if (err) { return err; }
-  internal::assign_utf8(receiver, content);
-  // Restore the string buffer location, effectively discarding any temporary string storage
-  _json_iter->string_buf_loc() = saved_string_buf_loc;
-  return SUCCESS;
+  raw_json_string raw;
+  SIMDJSON_TRY( get_root_raw_json_string(check_trailing).get(raw) );
+  return _json_iter->unescape(raw, receiver, allow_replacement);
 }
 simdjson_warn_unused simdjson_inline simdjson_result<std::string_view> value_iterator::get_root_wobbly_string(bool check_trailing) noexcept {
   return get_root_raw_json_string(check_trailing).unescape_wobbly(json_iter());
@@ -230136,6 +234731,23 @@ simdjson_inline simdjson_result<bool> value_iterator::is_root_null(bool check_tr
   return result;
 }
 
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child(token_position child_start) noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->position() == child_start) { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_child() noexcept {
+  if (_json_iter->depth() <= depth()) { return SUCCESS; }
+  if (_json_iter->depth() == depth() + 1 && *_json_iter->peek(-1) == ':') { return _json_iter->skip_value(depth()); }
+  return _json_iter->skip_partial(depth());
+}
+
+simdjson_warn_unused simdjson_inline error_code value_iterator::skip_field_value() noexcept {
+  SIMDJSON_ASSUME( _json_iter->_depth == _depth + 1 );
+  return _json_iter->skip_value(depth());
+}
+
 simdjson_warn_unused simdjson_inline error_code value_iterator::skip_child() noexcept {
   SIMDJSON_ASSUME( _json_iter->token._position > _start_position );
   SIMDJSON_ASSUME( _json_iter->_depth >= _depth );
@@ -230195,6 +234807,13 @@ simdjson_inline const uint8_t *value_iterator::peek_start() const noexcept {
   return _json_iter->peek(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_start_length() const noexcept {
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    const uint32_t length = _json_iter->peek_length(start_position());
+    const size_t remaining_input_length = _json_iter->remaining_input_length(peek_start());
+    return remaining_input_length < length ? uint32_t(remaining_input_length) : length;
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   return _json_iter->peek_length(start_position());
 }
 simdjson_inline uint32_t value_iterator::peek_root_length() const noexcept {
@@ -230258,6 +234877,12 @@ simdjson_inline const uint8_t *value_iterator::peek_root_scalar(const char *type
 }
 simdjson_inline const uint8_t *value_iterator::peek_non_root_scalar(const char *type) noexcept {
   logger::log_value(*_json_iter, start_position(), depth(), type);
+#ifdef SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
+  if (_json_iter->allow_incomplete_json()) {
+    if (is_at_start()) { assert_at_non_root_start(); }
+    return _json_iter->scalar_within_input(peek_start());
+  }
+#endif // SIMDJSON_EXPERIMENTAL_ALLOW_INCOMPLETE_JSON
   if (!is_at_start()) { return peek_start(); }
 
   assert_at_non_root_start();
@@ -230374,7 +234999,12 @@ inline void value_iterator::assert_at_root() const noexcept {
 
 inline void value_iterator::assert_at_non_root_start() const noexcept {
   assert_at_start();
-  SIMDJSON_ASSUME( _depth > 1 );
+  // The value is usually inside an array or object (depth > 1), but a root
+  // array or object obtained with document::get_value() is a value at depth 1.
+  // Scalar getters may be called on it: they see the leading '[' or '{' and
+  // fail (INCORRECT_TYPE, or NUMBER_ERROR for get_number() and friends)
+  // without advancing the iterator.
+  SIMDJSON_ASSUME( _depth > 0 );
 }
 
 inline void value_iterator::assert_is_valid() const noexcept {
