@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-28 16:40:07.596878. Do not edit! */
+/* auto-generated on 2026-11-18 22:02:12.420211. Do not edit! */
 /* begin file src/simdutf.cpp */
 #include "simdutf.h"
 // Overridden by kernels that must clear the upper vector state before calling
@@ -19,6 +19,8 @@ std::string_view to_string(encoding_type bom) {
     return "UTF32 big-endian";
   case UTF8:
     return "UTF8";
+  case Latin1:
+    return "Latin1";
   case unspecified:
     return "unknown";
   default:
@@ -4463,6 +4465,16 @@ template <typename T> struct simd16x32 {
         .to_bitmask();
   }
   simdutf_really_inline uint64_t not_in_range(const T low, const T high) const {
+    const T span = static_cast<T>(high - low);
+    if ((span & static_cast<T>(span + 1)) == 0 && (low & span) == 0) {
+      // Aligned power-of-two block, such as the surrogates: one AND and
+      // one compare, instead of a min/max and a compare per bound.
+      const simd16<T> keep = simd16<T>::splat(static_cast<T>(~span));
+      const simd16<T> base = simd16<T>::splat(low);
+      return ~simd16x32<bool>((this->chunks[0] & keep) == base,
+                              (this->chunks[1] & keep) == base)
+                  .to_bitmask();
+    }
     const simd16<T> mask_low = simd16<T>::splat(static_cast<T>(low - 1));
     const simd16<T> mask_high = simd16<T>::splat(static_cast<T>(high + 1));
     return simd16x32<bool>(
@@ -5476,6 +5488,18 @@ template <typename T> struct simd16x32 {
   }
 
   simdutf_really_inline uint64_t not_in_range(const T low, const T high) const {
+    const T span = static_cast<T>(high - low);
+    if ((span & static_cast<T>(span + 1)) == 0 && (low & span) == 0) {
+      // Aligned power-of-two block, such as the surrogates: one AND and
+      // one compare, instead of a min/max and a compare per bound.
+      const simd16<T> keep = simd16<T>::splat(static_cast<T>(~span));
+      const simd16<T> base = simd16<T>::splat(low);
+      return ~simd16x32<bool>((this->chunks[0] & keep) == base,
+                              (this->chunks[1] & keep) == base,
+                              (this->chunks[2] & keep) == base,
+                              (this->chunks[3] & keep) == base)
+                  .to_bitmask();
+    }
     const simd16<T> mask_low = simd16<T>::splat(static_cast<T>(low - 1));
     const simd16<T> mask_high = simd16<T>::splat(static_cast<T>(high + 1));
     return simd16x32<bool>(
@@ -7645,6 +7669,10 @@ public:
       const char *input, size_t length) const noexcept override;
   simdutf_warn_unused size_t binary_length_from_base64(
       const char16_t *input, size_t length) const noexcept override;
+
+#ifdef SIMDUTF_INTERNAL_TESTS
+  virtual std::vector<TestProcedure> internal_tests() const override;
+#endif
 };
 
 } // namespace lasx
@@ -7674,6 +7702,10 @@ SIMDUTF_TARGET_LASX
 // This should be the correct header whether
 // you use visual studio or other compilers.
 #include <lsxintrin.h>
+#if defined(__clang__) && !defined(__loongarch_asx)
+  #define __loongarch_asx 1
+  #define SIMDUTF_UNDEF_LOONGARCH_ASX 1
+#endif
 #include <lasxintrin.h>
 
 #if defined(__loongarch_asx)
@@ -7764,6 +7796,11 @@ static inline __m128i lasx_extracti128_hi(__m256i in) {
                    : [in] "f"(in));
   return out;
 }
+#endif
+
+#ifdef SIMDUTF_UNDEF_LOONGARCH_ASX
+  #undef __loongarch_asx
+  #undef SIMDUTF_UNDEF_LOONGARCH_ASX
 #endif
 
 /*
@@ -7951,11 +7988,12 @@ template <uint32_t x> constexpr __m256i lasx_splat_u32_aux() {
   #define lasx_splat_u32(v) lasx_splat_u32_aux<(v)>()
 #endif // QEMU_VLDI_BUG
 
-#ifndef lsx_splat_u16
-  #ifdef QEMU_VLDI_BUG
-    #define lsx_splat_u16(v) __lsx_vreplgr2vr_h(v)
-    #define lsx_splat_u32(v) __lsx_vreplgr2vr_w(v)
-  #else
+#ifdef QEMU_VLDI_BUG
+  #define lsx_splat_u16(v) __lsx_vreplgr2vr_h(v)
+  #define lsx_splat_u32(v) __lsx_vreplgr2vr_w(v)
+#else
+namespace simdutf {
+namespace lasx {
 namespace {
 template <uint16_t x> constexpr __m128i lsx_splat_u16_aux() {
   return ((int16_t(x) < 512) && (int16_t(x) > -512))
@@ -7979,10 +8017,11 @@ template <uint32_t x> constexpr __m128i lsx_splat_u32_aux() {
                     : __lsx_vreplgr2vr_w(x));
 }
 } // namespace
-    #define lsx_splat_u16(v) lsx_splat_u16_aux<(v)>()
-    #define lsx_splat_u32(v) lsx_splat_u32_aux<(v)>()
-  #endif // QEMU_VLDI_BUG
-#endif   // lsx_splat_u16
+} // namespace lasx
+} // namespace simdutf
+  #define lsx_splat_u16(v) lsx_splat_u16_aux<(v)>()
+  #define lsx_splat_u32(v) lsx_splat_u32_aux<(v)>()
+#endif // QEMU_VLDI_BUG
 
 #endif //  SIMDUTF_LASX_INTRINSICS_H
 /* end file src/simdutf/lasx/intrinsics.h */
@@ -8306,11 +8345,7 @@ template <> struct simd8<bool> : base8<bool> {
     uint32_t mask1 = __lasx_xvpickve2gr_wu(mask, 4);
     return (mask0 | (mask1 << 16));
   }
-  simdutf_really_inline bool any() const {
-    if (__lasx_xbz_b(this->value))
-      return false;
-    return true;
-  }
+  simdutf_really_inline bool any() const { return !__lasx_xbz_v(this->value); }
   simdutf_really_inline simd8<bool> operator~() const { return *this ^ true; }
 };
 
@@ -9226,11 +9261,12 @@ public:
 // #define QEMU_VLDI_BUG 1
 #endif
 
-#ifndef lsx_splat_u16
-  #ifdef QEMU_VLDI_BUG
-    #define lsx_splat_u16(v) __lsx_vreplgr2vr_h(v)
-    #define lsx_splat_u32(v) __lsx_vreplgr2vr_w(v)
-  #else
+#ifdef QEMU_VLDI_BUG
+  #define lsx_splat_u16(v) __lsx_vreplgr2vr_h(v)
+  #define lsx_splat_u32(v) __lsx_vreplgr2vr_w(v)
+#else
+namespace simdutf {
+namespace lsx {
 namespace {
 template <uint16_t x> constexpr __m128i lsx_splat_u16_aux() {
   return ((int16_t(x) < 512) && (int16_t(x) > -512))
@@ -9254,11 +9290,12 @@ template <uint32_t x> constexpr __m128i lsx_splat_u32_aux() {
                     : __lsx_vreplgr2vr_w(x));
 }
 } // namespace
-    #define lsx_splat_u16(v) lsx_splat_u16_aux<(v)>()
-    #define lsx_splat_u32(v) lsx_splat_u32_aux<(v)>()
-  #endif // QEMU_VLDI_BUG
-#endif   // lsx_splat_u16
-#endif   //  SIMDUTF_LSX_INTRINSICS_H
+} // namespace lsx
+} // namespace simdutf
+  #define lsx_splat_u16(v) lsx_splat_u16_aux<(v)>()
+  #define lsx_splat_u32(v) lsx_splat_u32_aux<(v)>()
+#endif // QEMU_VLDI_BUG
+#endif //  SIMDUTF_LSX_INTRINSICS_H
 /* end file src/simdutf/lsx/intrinsics.h */
 /* begin file src/simdutf/lsx/bitmanipulation.h */
 #ifndef SIMDUTF_LSX_BITMANIPULATION_H
@@ -11331,8 +11368,8 @@ arm_convert_latin1_to_utf8(const char *latin1_input, size_t len,
   uint8_t *utf8_output = reinterpret_cast<uint8_t *>(utf8_out);
   const char *end = latin1_input + len;
   const uint16x8_t v_c080 = vmovq_n_u16((uint16_t)0xc080);
-  // We always write 16 bytes, of which more than the first 8 bytes
-  // are valid. A safety margin of 8 is more than sufficient.
+  // We always write 16 bytes, of which at least the first 8 bytes
+  // are valid.
   while (end - latin1_input >= 16 + 8) {
     uint8x16_t in8 = vld1q_u8(reinterpret_cast<const uint8_t *>(latin1_input));
     if (vmaxvq_u8(in8) <= 0x7F) { // ASCII fast path!!!!
@@ -12011,6 +12048,33 @@ void load_block(block64 *b, const char16_t *src) {
   b->chunks[3] = load_satured(reinterpret_cast<const uint16_t *>(src) + 48);
 }
 
+uint64_t equal_sign_mask(const block64 &b) {
+  const uint8x16_t equal = vdupq_n_u8('=');
+  uint8x16_t test0 = vceqq_u8(b.chunks[0], equal);
+  uint8x16_t test1 = vceqq_u8(b.chunks[1], equal);
+  uint8x16_t test2 = vceqq_u8(b.chunks[2], equal);
+  uint8x16_t test3 = vceqq_u8(b.chunks[3], equal);
+  if (vmaxvq_u8(vorrq_u8(vorrq_u8(test0, test1), vorrq_u8(test2, test3))) ==
+      0) {
+    return 0;
+  }
+#ifdef SIMDUTF_REGULAR_VISUAL_STUDIO
+  const uint8x16_t bit_mask =
+      simdutf_make_uint8x16_t(0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
+                              0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80);
+#else
+  const uint8x16_t bit_mask = {0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80,
+                               0x01, 0x02, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80};
+#endif
+  uint8x16_t sum0 =
+      vpaddq_u8(vandq_u8(test0, bit_mask), vandq_u8(test1, bit_mask));
+  uint8x16_t sum1 =
+      vpaddq_u8(vandq_u8(test2, bit_mask), vandq_u8(test3, bit_mask));
+  sum0 = vpaddq_u8(sum0, sum1);
+  sum0 = vpaddq_u8(sum0, sum0);
+  return vgetq_lane_u64(vreinterpretq_u64_u8(sum0), 0);
+}
+
 // decode 64 bytes and output 48 bytes
 void base64_decode_block(char *out, const char *src) {
   uint8x16x4_t str = vld4q_u8((uint8_t *)src);
@@ -12106,7 +12170,10 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -12119,7 +12186,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
   }
   const char_type *const srcinit = src;
   const char *const dstinit = dst;
-  const char_type *const srcend = src + srclen;
+  const char_type *srcend = src + srclen;
 
   constexpr size_t block_size = 10;
   char buffer[block_size * 64];
@@ -12129,6 +12196,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
     while (src <= srcend64) {
       block64 b;
       load_block(&b, src);
+      const block64 raw = b;
       src += 64;
       bool error = false;
       uint64_t badcharmask =
@@ -12148,6 +12216,24 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
         }
       }
 
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = equal_sign_mask(raw);
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - 64 - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += compress_block(
+              &b, badcharmask | (~uint64_t(0) << offset), bufferptr);
+          break;
+        }
+      }
       if (badcharmask != 0) {
         // optimization opportunity: check for simple masks like those made of
         // continuous 1s followed by continuous 0s. And masks containing a
@@ -12174,6 +12260,22 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
       }
     }
   }
+  if (ignore_garbage && equalsigns == 0) {
+    const char_type *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -12187,7 +12289,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -12206,7 +12308,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
 #if !SIMDUTF_IS_BIG_ENDIAN
       triple = scalar::u32_swap_bytes(triple);
 #endif
-      std::memcpy(dst, &triple, 4);
+      std::memcpy(dst, &triple, 3);
 
       dst += 3;
       buffer_start += 4;
@@ -12234,7 +12336,8 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -12277,7 +12380,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 /* end file src/arm64/arm_base64.cpp */
 /* begin file src/arm64/arm_find.cpp */
@@ -13481,9 +13584,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -13492,8 +13595,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -13579,9 +13682,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -13589,7 +13692,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -13697,18 +13800,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
@@ -16448,7 +16550,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t padding_characters = ri.equalsigns;
   srclen = ri.srclen;
@@ -16461,7 +16566,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
-  const chartype *const srcend = src + srclen;
+  const chartype *srcend = src + srclen;
 
   // A 64-byte store writes 16 bytes past the 48 valid bytes it produces, so it
   // is only allowed when at least 16 more bytes of real output follow it. We
@@ -16585,6 +16690,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     while (src <= srcend64) {
       block64 b;
       load_block(&b, src);
+      const __m512i raw = b.chunks[0];
       src += 64;
       uint64_t error = 0;
       uint64_t badcharmask =
@@ -16594,6 +16700,25 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         size_t error_offset = _tzcnt_u64(error);
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
+      }
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals =
+            _mm512_cmpeq_epi8_mask(raw, _mm512_set1_epi8('='));
+        if (equals != 0) {
+          const size_t offset = _tzcnt_u64(equals);
+          equallocation = size_t(src - 64 - srcinit) + offset;
+          padding_characters = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += compress_block(
+              &b, badcharmask | (~uint64_t(0) << offset), bufferptr);
+          break;
+        }
       }
       if (badcharmask != 0) {
         // optimization opportunity: check for simple masks like those made of
@@ -16628,6 +16753,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     __mmask64 input_mask = ((__mmask64)1 << last_block_len) - 1;
     block64 b;
     load_block_partial(&b, src, input_mask);
+    const __m512i raw = b.chunks[0];
     uint64_t error = 0;
     uint64_t badcharmask = to_base64_mask<ignore_garbage>(&b, &error, lookup0,
                                                           lookup1, input_mask);
@@ -16635,6 +16761,23 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       size_t error_offset = _tzcnt_u64(error);
       return {error_code::INVALID_BASE64_CHARACTER,
               size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
+    }
+    if (ignore_garbage) {
+      const uint64_t equals =
+          _mm512_mask_cmpeq_epi8_mask(input_mask, raw, _mm512_set1_epi8('='));
+      if (equals != 0) {
+        const size_t offset = _tzcnt_u64(equals);
+        equallocation = size_t(src - srcinit) + offset;
+        padding_characters = 1;
+        srclen = equallocation;
+        full_input_length = equallocation + 1;
+        if (srclen == 0) {
+          return {SUCCESS, full_input_length, 0};
+        }
+        srcend = srcinit + srclen;
+        badcharmask |= ~uint64_t(0) << offset;
+        last_block_len = int(offset);
+      }
     }
     src += last_block_len;
     bufferptr += compress_block(&b, badcharmask, bufferptr);
@@ -16817,7 +16960,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 
 simdutf_warn_unused size_t icelake_binary_length_from_base64(const char *input,
@@ -17313,9 +17456,9 @@ simdutf_warn_unused result implementation::convert_utf8_to_latin1_with_errors(
   }
   size_t pos = obuf - buf;
   SIMDUTF_VZEROUPPER();
-  result res = scalar::utf8_to_latin1::rewind_and_convert_with_errors(
-      pos, buf + pos, len - pos, latin1_output);
-  res.count += pos;
+  result res = scalar::utf8_to_latin1::convert_with_errors(obuf, len - pos,
+                                                           olatin1_output);
+  res.count += res.error ? pos : size_t(olatin1_output - latin1_output);
   return res;
 }
 
@@ -18372,6 +18515,15 @@ public:
 
     chunks[0] = _mm256_packus_epi16(m1p, m2p);
     chunks[1] = _mm256_packus_epi16(m3p, m4p);
+  }
+
+  simdutf_really_inline uint64_t equal_sign_mask() const {
+    const __m256i equal = _mm256_set1_epi8('=');
+    const uint64_t m0 =
+        uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunks[0], equal)));
+    const uint64_t m1 =
+        uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chunks[1], equal)));
+    return m0 | (m1 << 32);
   }
 
   simdutf_really_inline void copy_block(char *output) {
@@ -19618,9 +19770,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -19629,8 +19781,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -19716,9 +19868,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -19726,7 +19878,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -19834,18 +19986,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
@@ -19953,7 +20104,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -19966,7 +20120,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
-  const chartype *const srcend = src + srclen;
+  const chartype *srcend = src + srclen;
 
   constexpr size_t block_size = 6;
   static_assert(block_size >= 2, "block_size must be at least two");
@@ -20012,6 +20166,24 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = block64(src).equal_sign_mask();
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += b.compress_block(badcharmask | (~uint64_t(0) << offset),
+                                        bufferptr);
+          break;
+        }
+      }
       src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
@@ -20036,6 +20208,22 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
   }
 
+  if (ignore_garbage && equalsigns == 0) {
+    const chartype *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -20050,7 +20238,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -20105,7 +20293,8 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -20148,7 +20337,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 
 } // namespace base64
@@ -21704,7 +21893,7 @@ ppc64_convert_latin1_to_utf8(const char *latin_input,
   // each latin1 takes 1-2 utf8 bytes
   // slow path writes useful 8-15 bytes twice (eagerly writes 16 bytes and then
   // adjust the pointer) so the last write can exceed the utf8_output size by
-  // 8-1 bytes by reserving 8 extra input bytes, we expect the output to have
+  // 8 bytes by reserving 8 extra input bytes, we expect the output to have
   // 8-16 bytes free
   while (end - latin_input >= 16 + 8) {
     // Load 16 Latin1 characters (16 bytes) into a 128-bit register
@@ -22622,6 +22811,15 @@ public:
     return m0 | (m1 << 16) | (m2 << 32) | (m3 << 48);
   }
 
+  simdutf_really_inline uint64_t equal_sign_mask() const {
+    const vector_u8 equal('=');
+    const uint64_t m0 = (b.chunks[0] == equal).to_bitmask();
+    const uint64_t m1 = (b.chunks[1] == equal).to_bitmask();
+    const uint64_t m2 = (b.chunks[2] == equal).to_bitmask();
+    const uint64_t m3 = (b.chunks[3] == equal).to_bitmask();
+    return m0 | (m1 << 16) | (m2 << 32) | (m3 << 48);
+  }
+
   simdutf_really_inline void copy_block(char *output) {
     b.store(reinterpret_cast<uint8_t *>(output));
   }
@@ -23525,9 +23723,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -23536,8 +23734,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -23623,9 +23821,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -23633,7 +23831,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -23741,18 +23939,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
@@ -23860,7 +24057,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -23873,7 +24073,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
-  const chartype *const srcend = src + srclen;
+  const chartype *srcend = src + srclen;
 
   constexpr size_t block_size = 6;
   static_assert(block_size >= 2, "block_size must be at least two");
@@ -23919,6 +24119,24 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = block64(src).equal_sign_mask();
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += b.compress_block(badcharmask | (~uint64_t(0) << offset),
+                                        bufferptr);
+          break;
+        }
+      }
       src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
@@ -23943,6 +24161,22 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
   }
 
+  if (ignore_garbage && equalsigns == 0) {
+    const chartype *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -23957,7 +24191,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -24012,7 +24246,8 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -24055,7 +24290,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 
 } // namespace base64
@@ -25160,7 +25395,7 @@ sse_convert_latin1_to_utf8(const char *latin_input,
   // each latin1 takes 1-2 utf8 bytes
   // slow path writes useful 8-15 bytes twice (eagerly writes 16 bytes and then
   // adjust the pointer) so the last write can exceed the utf8_output size by
-  // 8-1 bytes by reserving 8 extra input bytes, we expect the output to have
+  // 8 bytes by reserving 8 extra input bytes, we expect the output to have
   // 8-16 bytes free
   while (end - latin_input >= 16 + 8) {
     // Load 16 Latin1 characters (16 bytes) into a 128-bit register
@@ -25713,6 +25948,19 @@ public:
   }
 
 public:
+  simdutf_really_inline uint64_t equal_sign_mask() const {
+    const __m128i equal = _mm_set1_epi8('=');
+    const uint64_t m0 =
+        uint16_t(_mm_movemask_epi8(_mm_cmpeq_epi8(chunks[0], equal)));
+    const uint64_t m1 =
+        uint16_t(_mm_movemask_epi8(_mm_cmpeq_epi8(chunks[1], equal)));
+    const uint64_t m2 =
+        uint16_t(_mm_movemask_epi8(_mm_cmpeq_epi8(chunks[2], equal)));
+    const uint64_t m3 =
+        uint16_t(_mm_movemask_epi8(_mm_cmpeq_epi8(chunks[3], equal)));
+    return m0 | (m1 << 16) | (m2 << 32) | (m3 << 48);
+  }
+
   simdutf_really_inline void copy_block(char *output) {
     _mm_storeu_si128(reinterpret_cast<__m128i *>(output), chunks[0]);
     _mm_storeu_si128(reinterpret_cast<__m128i *>(output + 16), chunks[1]);
@@ -26913,9 +27161,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -26924,8 +27172,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -27011,9 +27259,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -27021,7 +27269,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -27129,18 +27377,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
@@ -27248,7 +27495,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -27261,7 +27511,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
-  const chartype *const srcend = src + srclen;
+  const chartype *srcend = src + srclen;
 
   constexpr size_t block_size = 6;
   static_assert(block_size >= 2, "block_size must be at least two");
@@ -27307,6 +27557,24 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER,
                 size_t(src - srcinit + error_offset), size_t(dst - dstinit)};
       }
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = block64(src).equal_sign_mask();
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += b.compress_block(badcharmask | (~uint64_t(0) << offset),
+                                        bufferptr);
+          break;
+        }
+      }
       src += 64;
       if (badcharmask != 0) {
         bufferptr += b.compress_block(badcharmask, bufferptr);
@@ -27331,6 +27599,22 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
   }
 
+  if (ignore_garbage && equalsigns == 0) {
+    const chartype *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -27345,7 +27629,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -27400,7 +27684,8 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -27443,7 +27728,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 
 } // namespace base64
@@ -27979,8 +28264,8 @@ lasx_convert_latin1_to_utf8(const char *latin1_input, size_t len,
   const size_t safety_margin = 12;
   const char *end = latin1_input + len;
 
-  // We always write 16 bytes, of which more than the first 8 bytes
-  // are valid. A safety margin of 8 is more than sufficient.
+  // We always write 16 bytes, of which at least the first 8 bytes
+  // are valid. A safety margin of 8 is sufficient.
   while (end - latin1_input >= std::ptrdiff_t(16 + safety_margin)) {
     __m128i in8 = __lsx_vld(reinterpret_cast<const uint8_t *>(latin1_input), 0);
     uint32_t ascii_mask = __lsx_vpickve2gr_wu(__lsx_vmskgez_b(in8), 0);
@@ -28715,6 +29000,17 @@ static inline void load_block(block64 *b, const char16_t *src) {
   b->chunks[1] = __lasx_xvpermi_d(__lasx_xvssrlni_bu_h(m4, m3, 0), 0b11011000);
 }
 
+static inline uint64_t equal_sign_mask(const block64 &b) {
+  const __m256i equal = __lasx_xvrepli_b('=');
+  const __m256i t0 = __lasx_xvmskltz_b(__lasx_xvseq_b(b.chunks[0], equal));
+  const __m256i t1 = __lasx_xvmskltz_b(__lasx_xvseq_b(b.chunks[1], equal));
+  const uint64_t m0 = __lasx_xvpickve2gr_wu(t0, 0) |
+                      (__lsx_vpickve2gr_hu(lasx_extracti128_hi(t0), 0) << 16);
+  const uint64_t m1 = __lasx_xvpickve2gr_wu(t1, 0) |
+                      (__lsx_vpickve2gr_hu(lasx_extracti128_hi(t1), 0) << 16);
+  return m0 | (m1 << 32);
+}
+
 // exact_tail stores 12 bytes from the high lane so a block ends at byte 48.
 template <bool exact_tail = false>
 static inline void base64_decode(char *out, __m256i str) {
@@ -28765,7 +29061,10 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -28778,7 +29077,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
   }
   const chartype *const srcinit = src;
   const char *const dstinit = dst;
-  const chartype *const srcend = src + srclen;
+  const chartype *srcend = src + srclen;
 
   constexpr size_t block_size = 6;
   static_assert(block_size >= 2, "block_size must be at least two");
@@ -28827,6 +29126,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     while (src <= srcend64) {
       block64 b;
       load_block(&b, src);
+      const block64 raw = b;
       src += 64;
       bool error = false;
       uint64_t badcharmask =
@@ -28839,6 +29139,24 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         }
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
+      }
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = equal_sign_mask(raw);
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - 64 - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += compress_block(
+              &b, badcharmask | (~uint64_t(0) << offset), bufferptr);
+          break;
+        }
       }
       if (badcharmask != 0) {
         if (is_power_of_two(badcharmask)) {
@@ -28867,6 +29185,22 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
     }
   }
 
+  if (ignore_garbage && equalsigns == 0) {
+    const chartype *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -28881,7 +29215,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -28903,7 +29237,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
                         << 8;
       // lasx is little-endian
       triple = scalar::u32_swap_bytes(triple);
-      std::memcpy(dst, &triple, 4);
+      std::memcpy(dst, &triple, 3);
 
       dst += 3;
       buffer_start += 4;
@@ -28930,7 +29264,8 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -28973,7 +29308,7 @@ compress_decode_base64(char *dst, const chartype *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 /* end file src/lasx/lasx_base64.cpp */
 /* begin file src/lasx/lasx_find.cpp */
@@ -29826,9 +30161,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -29837,8 +30172,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -29924,9 +30259,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -29934,7 +30269,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -30042,18 +30377,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
@@ -30275,6 +30609,10 @@ simdutf_warn_unused size_t binary_length_from_base64(const char16_t *input,
 } // namespace lasx
 } // namespace simdutf
 /* end file src/generic/base64lengths.h */
+
+#ifdef SIMDUTF_INTERNAL_TESTS
+  #include "lasx_internal_tests.cpp"
+#endif // SIMDUTF_INTERNAL_TESTS
 
 //
 // Implementation-specific overrides
@@ -30630,6 +30968,16 @@ simdutf_warn_unused size_t implementation::binary_length_from_base64(
   return base64_lengths::binary_length_from_base64(input, length);
 }
 
+#ifdef SIMDUTF_INTERNAL_TESTS
+std::vector<implementation::TestProcedure>
+implementation::internal_tests() const {
+  #define entry(proc)                                                          \
+    TestProcedure { #proc, proc }
+  return {entry(simd8_bool_any)};
+  #undef entry
+}
+#endif
+
 } // namespace lasx
 } // namespace simdutf
 
@@ -30706,8 +31054,8 @@ lsx_convert_latin1_to_utf8(const char *latin1_input, size_t len,
   const char *end = latin1_input + len;
 
   __m128i zero = __lsx_vldi(0);
-  // We always write 16 bytes, of which more than the first 8 bytes
-  // are valid. A safety margin of 8 is more than sufficient.
+  // We always write 16 bytes, of which at least the first 8 bytes
+  // are valid.
   while (end - latin1_input >= 16) {
     __m128i in8 = __lsx_vld(reinterpret_cast<const uint8_t *>(latin1_input), 0);
     uint32_t ascii = __lsx_vpickve2gr_hu(__lsx_vmskgez_b(in8), 0);
@@ -31421,6 +31769,19 @@ static inline void load_block(block64 *b, const char16_t *src) {
   b->chunks[3] = __lsx_vssrlni_bu_h(m8, m7, 0);
 }
 
+static inline uint64_t equal_sign_mask(const block64 &b) {
+  const __m128i equal = __lsx_vrepli_b('=');
+  const uint64_t m0 =
+      __lsx_vpickve2gr_hu(__lsx_vmskltz_b(__lsx_vseq_b(b.chunks[0], equal)), 0);
+  const uint64_t m1 =
+      __lsx_vpickve2gr_hu(__lsx_vmskltz_b(__lsx_vseq_b(b.chunks[1], equal)), 0);
+  const uint64_t m2 =
+      __lsx_vpickve2gr_hu(__lsx_vmskltz_b(__lsx_vseq_b(b.chunks[2], equal)), 0);
+  const uint64_t m3 =
+      __lsx_vpickve2gr_hu(__lsx_vmskltz_b(__lsx_vseq_b(b.chunks[3], equal)), 0);
+  return m0 | (m1 << 16) | (m2 << 32) | (m3 << 48);
+}
+
 static inline void base64_decode(char *out, __m128i str) {
   __m128i t0 = __lsx_vor_v(
       __lsx_vslli_w(str, 26),
@@ -31470,7 +31831,10 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
       default_or_url ? tables::base64::to_base64_default_or_url_value
                      : (base64_url ? tables::base64::to_base64_url_value
                                    : tables::base64::to_base64_value);
-  auto ri = simdutf::scalar::base64::find_end(src, srclen, options);
+  auto ri =
+      ignore_garbage
+          ? simdutf::scalar::base64::reduced_input{0, srclen, srclen, srclen}
+          : simdutf::scalar::base64::find_end(src, srclen, options);
   size_t equallocation = ri.equallocation;
   size_t equalsigns = ri.equalsigns;
   srclen = ri.srclen;
@@ -31483,7 +31847,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
   }
   const char_type *const srcinit = src;
   const char *const dstinit = dst;
-  const char_type *const srcend = src + srclen;
+  const char_type *srcend = src + srclen;
 
   constexpr size_t block_size = 10;
   char buffer[block_size * 64];
@@ -31493,6 +31857,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
     while (src <= srcend64) {
       block64 b;
       load_block(&b, src);
+      const block64 raw = b;
       src += 64;
       bool error = false;
       uint64_t badcharmask =
@@ -31512,6 +31877,24 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
         }
       }
 
+      if (ignore_garbage && badcharmask != 0) {
+        const uint64_t equals = equal_sign_mask(raw);
+        if (equals != 0) {
+          const size_t offset = trailing_zeroes(equals);
+          equallocation = size_t(src - 64 - srcinit) + offset;
+          equalsigns = 1;
+          srclen = equallocation;
+          full_input_length = equallocation + 1;
+          if (srclen == 0) {
+            return {SUCCESS, full_input_length, 0};
+          }
+          srcend = srcinit + srclen;
+          src = srcend;
+          bufferptr += compress_block(
+              &b, badcharmask | (~uint64_t(0) << offset), bufferptr);
+          break;
+        }
+      }
       if (badcharmask != 0) {
         if (is_power_of_two(badcharmask)) {
           bufferptr += compress_block_single(&b, badcharmask, bufferptr);
@@ -31535,6 +31918,22 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
       }
     }
   }
+  if (ignore_garbage && equalsigns == 0) {
+    const char_type *equal = src;
+    while (equal < srcend && *equal != '=') {
+      equal++;
+    }
+    if (equal < srcend) {
+      equallocation = size_t(equal - srcinit);
+      equalsigns = 1;
+      srclen = equallocation;
+      full_input_length = equallocation + 1;
+      if (srclen == 0) {
+        return {SUCCESS, full_input_length, 0};
+      }
+      srcend = equal;
+    }
+  }
   char *buffer_start = buffer;
   // Optimization note: if this is almost full, then it is worth our
   // time, otherwise, we should just decode directly.
@@ -31548,7 +31947,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
         return {error_code::INVALID_BASE64_CHARACTER, size_t(src - srcinit),
                 size_t(dst - dstinit)};
       }
-      bufferptr += (val <= 63);
+      bufferptr += (val <= 63 && scalar::base64::is_eight_byte(*src));
       src++;
     }
   }
@@ -31566,7 +31965,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
                         << 8;
       // lsx is little-endian
       triple = scalar::u32_swap_bytes(triple);
-      std::memcpy(dst, &triple, 4);
+      std::memcpy(dst, &triple, 3);
 
       dst += 3;
       buffer_start += 4;
@@ -31593,7 +31992,8 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
           src--;
         }
       } else {
-        while (to_base64[uint8_t(*(src - 1))] >= 64) {
+        while (!scalar::base64::is_eight_byte(*(src - 1)) ||
+               to_base64[uint8_t(*(src - 1))] >= 64) {
           src--;
         }
       }
@@ -31636,7 +32036,7 @@ compress_decode_base64(char *dst, const char_type *src, size_t srclen,
               true};
     }
   }
-  return {SUCCESS, srclen, size_t(dst - dstinit)};
+  return {SUCCESS, full_input_length, size_t(dst - dstinit)};
 }
 /* end file src/lsx/lsx_base64.cpp */
 /* begin file src/lsx/lsx_find.cpp */
@@ -32485,9 +32885,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 16 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -32496,8 +32896,8 @@ struct validating_transcoder {
       leading_byte += (int8_t(in[margin - 1]) >
                        -65); // twos complement of -65 is 1011 1111 ...
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
-    // leading byte.
+    // If the input is long enough, then we have that margin is the sixteenth
+    // last leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
       simd8x64<int8_t> input(reinterpret_cast<const int8_t *>(in + pos));
@@ -32583,9 +32983,9 @@ struct validating_transcoder {
     size_t pos = 0;
     char *start{latin1_output};
     // In the worst case, we have the haswell kernel which can cause an overflow
-    // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the
+    // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the
     // last 16 bytes, and if the data is valid, then it is entirely safe because
-    // 16 UTF-8 bytes generate much more than 8 bytes. However, you cannot
+    // 16 UTF-8 bytes generate at least 4 bytes. However, you cannot
     // generally assume that you have valid UTF-8 input, so we are going to go
     // back from the end counting 8 leading bytes, to give us a good margin.
     size_t leading_byte = 0;
@@ -32593,7 +32993,7 @@ struct validating_transcoder {
     for (; margin > 0 && leading_byte < 8; margin--) {
       leading_byte += (int8_t(in[margin - 1]) > -65);
     }
-    // If the input is long enough, then we have that margin-1 is the eight last
+    // If the input is long enough, then we have that margin is the eighth last
     // leading byte.
     const size_t safety_margin = size - margin + 1; // to avoid overruns!
     while (pos + 64 + safety_margin <= size) {
@@ -32701,18 +33101,17 @@ simdutf_really_inline size_t convert_valid(const char *in, size_t size,
   size_t pos = 0;
   char *start{latin1_output};
   // In the worst case, we have the haswell kernel which can cause an overflow
-  // of 8 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
-  // 16 bytes, and if the data is valid, then it is entirely safe because 16
-  // UTF-8 bytes generate much more than 8 bytes. However, you cannot generally
-  // assume that you have valid UTF-8 input, so we are going to go back from the
-  // end counting 8 leading bytes, to give us a good margin.
+  // of 4 bytes when calling convert_masked_utf8_to_latin1. If you skip the last
+  // 16 bytes, then it is entirely safe because 16 valid UTF-8 bytes generate
+  // at least 4 bytes. We go back from the end counting 8 leading bytes, which
+  // gives us a good margin.
   size_t leading_byte = 0;
   size_t margin = size;
   for (; margin > 0 && leading_byte < 8; margin--) {
     leading_byte += (int8_t(in[margin - 1]) >
                      -65); // twos complement of -65 is 1011 1111 ...
   }
-  // If the input is long enough, then we have that margin-1 is the eight last
+  // If the input is long enough, then we have that margin is the eighth last
   // leading byte.
   const size_t safety_margin = size - margin + 1; // to avoid overruns!
   while (pos + 64 + safety_margin <= size) {
