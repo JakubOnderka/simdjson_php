@@ -106,9 +106,9 @@ static const char* simdjson_stream_mmap(php_stream *stream, size_t size, size_t 
         return NULL;
     }
 
-#if defined(HAVE_MMAP) && defined(MADV_SEQUENTIAL) && defined(MADV_WILLNEED)
+#if defined(HAVE_MMAP) && defined(MADV_SEQUENTIAL)
     // Give advise to OS how we will use mmapped file
-    madvise((void*)p, *mapped, MADV_SEQUENTIAL | MADV_WILLNEED);
+    madvise((void*)p, *mapped, MADV_SEQUENTIAL);
 #endif
 
     // Seek to end of mapped part of file
