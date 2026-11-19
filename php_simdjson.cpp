@@ -954,7 +954,7 @@ PHP_FUNCTION(simdjson_base64_encode) {
 
     if (UNEXPECTED(line_length != 0)) {
         if (line_length < 0) {
-            zend_argument_value_error(3, "must be greater than 0");
+            zend_argument_value_error(3, "must be greater than or equal to 0");
             RETURN_THROWS();
         }
 
@@ -1003,7 +1003,7 @@ PHP_FUNCTION(simdjson_base64_encode_from_stream) {
     ZEND_PARSE_PARAMETERS_END();
 
     if (UNEXPECTED(line_length < 0)) {
-        zend_argument_value_error(3, "must be greater than 0");
+        zend_argument_value_error(3, "must be greater than or equal than 0");
         RETURN_THROWS();
     }
 
