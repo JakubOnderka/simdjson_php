@@ -2,7 +2,6 @@
 #define SIMDJSON_ENCODER_H
 
 #include "php.h"
-#include "zend_smart_str.h"
 
 /* error codes */
 typedef enum {
@@ -43,9 +42,9 @@ struct _simdjson_encoder {
 typedef struct {
     const char str[SIMDJSON_ENCODER_ESCAPE_LENGTH];
     size_t len;
-} _simdjson_escaped;
+} simdjson_escaped;
 
-static const _simdjson_escaped simdjson_escape[] = {
+static const simdjson_escaped simdjson_escape[] = {
     {"\\u0000", 6},
     {"\\u0001", 6},
     {"\\u0002", 6},
@@ -142,7 +141,7 @@ static const _simdjson_escaped simdjson_escape[] = {
 };
 
 // Chars that needs to be escaped according to RFC specification
-static const char simdjson_need_escaping[] = {
+static const unsigned char simdjson_need_escaping[256] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 32
     0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 64
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, // 96
