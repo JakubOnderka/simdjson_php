@@ -177,7 +177,7 @@ jobs:
         run: |
           phpize
           ./configure
-          make -j$(nproc)
+          make -j$(sysctl -n hw.logicalcpu)
 
       - name: Run tests
         env:
