@@ -924,7 +924,6 @@ PHP_METHOD(SimdJsonBase64Encode, __construct) {
         Z_PARAM_BOOL(base64_url)
     ZEND_PARSE_PARAMETERS_END();
 
-    return_value = ZEND_THIS;
     ZVAL_STR_COPY(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 0), binary_string);
     ZVAL_BOOL(OBJ_PROP_NUM(Z_OBJ_P(ZEND_THIS), 1), base64_url);
 }
