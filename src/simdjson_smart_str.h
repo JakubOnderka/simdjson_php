@@ -13,20 +13,26 @@
 	(ZEND_MM_ALIGNED_SIZE_EX(len + SMART_STR_OVERHEAD, SMART_STR_PAGE) - SMART_STR_OVERHEAD)
 
 static void simdjson_smart_str_init(smart_str *str) {
+    ZEND_ASSERT(str != NULL);
     ZEND_ASSERT(str->s == NULL);
+
     str->a = SMART_STR_START_LEN;
     str->s = zend_string_alloc(str->a, 0);
     ZSTR_LEN(str->s) = 0;
 }
 
 static void simdjson_smart_str_erealloc(smart_str *str, size_t len) {
+    ZEND_ASSERT(str != NULL);
     ZEND_ASSERT(str->s != NULL);
+
     str->a = SMART_STR_NEW_LEN(len);
     str->s = (zend_string *) erealloc2(str->s, str->a + _ZSTR_HEADER_SIZE + 1, _ZSTR_HEADER_SIZE + ZSTR_LEN(str->s));
 }
 
 static zend_always_inline char* simdjson_smart_str_alloc(smart_str *str, size_t len) {
+    ZEND_ASSERT(str != NULL);
     ZEND_ASSERT(str->s != NULL);
+
     len += ZSTR_LEN(str->s);
     if (UNEXPECTED(len >= str->a)) {
         simdjson_smart_str_erealloc(str, len);
@@ -60,6 +66,9 @@ static zend_always_inline void simdjson_smart_str_appendl(smart_str *dest, const
 }
 
 static zend_always_inline zend_string *simdjson_smart_str_extract(const smart_str *str) {
+    ZEND_ASSERT(str != NULL);
+    ZEND_ASSERT(str->s != NULL);
+
     ZSTR_VAL(str->s)[ZSTR_LEN(str->s)] = '\0';
     size_t free_space = str->a - ZSTR_LEN(str->s);
     if (free_space > SMART_STR_PAGE) { // reallocate just when saving is bigger than 4096 bytes
