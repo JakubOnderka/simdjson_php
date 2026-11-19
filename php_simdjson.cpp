@@ -339,7 +339,9 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
 
 standard_decoding:
     php_stream_statbuf ssbuf;
-    php_stream_stat(stream, &ssbuf);
+    if (php_stream_stat(stream, &ssbuf) != 0 || ssbuf.sb.st_size < 0) {
+        ssbuf.sb.st_size = 0;
+    }
 
     const char* p = simdjson_stream_mmap(stream, ssbuf.sb.st_size, &len);
     if (p != NULL) {
@@ -1009,7 +1011,9 @@ PHP_FUNCTION(simdjson_base64_encode_from_stream) {
     auto options = url ? simdutf::base64_url : simdutf::base64_default;
 
     php_stream_statbuf ssbuf;
-    php_stream_stat(stream, &ssbuf);
+    if (php_stream_stat(stream, &ssbuf) != 0 || ssbuf.sb.st_size < 0) {
+        ssbuf.sb.st_size = 0;
+    }
 
     const char* p = simdjson_stream_mmap(stream, ssbuf.sb.st_size, &len);
     if (p != NULL) {
