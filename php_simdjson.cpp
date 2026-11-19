@@ -255,6 +255,7 @@ PHP_FUNCTION(simdjson_decode) {
 #if PHP_VERSION_ID >= 80200
 // In case whole data of temp stream is in memory, we can just read stream buffer without allocating new buffer
 static zend_string* simdjson_temp_stream_memory_buffer(php_stream *stream) {
+    // Partial copy of php_stream_temp_data struct that is not exported
     struct simdjson_php_stream_temp_data {
         php_stream *innerstream;
     };
@@ -298,7 +299,7 @@ PHP_FUNCTION(simdjson_decode_from_stream) {
         if (php_stream_is(stream, PHP_STREAM_IS_TEMP)) {
             buffer = simdjson_temp_stream_memory_buffer(stream);
             if (buffer == NULL) {
-                // temp buffer is not
+                // temp stream is not in memory
                 goto standard_decoding;
             }
         } else {
